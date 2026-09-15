@@ -807,14 +807,17 @@ export interface components {
             message: string;
         };
         /**
-         * @description Answerability 决策类型（R4）。回答/拒答的<b>原因</b>，供调试与评测归因：
+         * @description Answerability 决策类型（R4；R4.1 移除未采用的 HIGH_CONFIDENCE_ACCEPT）。
+         *     回答/拒答的<b>原因</b>，供调试与评测归因：
          *     LOW_SCORE_REFUSAL=低于低分阈值直接拒答（未调 Judge）；NO_HITS=零命中直接拒答；
-         *     HIGH_CONFIDENCE_ACCEPT=高于高分阈值直接生成（未调 Judge）；JUDGE_ACCEPT/JUDGE_REFUSE=
-         *     灰区由 Evidence Sufficiency Judge 判定；JUDGE_DEGRADED=Judge 失败按降级策略处理；
-         *     ANSWERABILITY_DISABLED=判定关闭（仅对照，行为同旧 RefusalPolicy）。
+         *     JUDGE_ACCEPT/JUDGE_REFUSE=灰区与高分由 Evidence Sufficiency Judge 判定
+         *     （R4 Baseline 证明高分不可答与可答分数完全重叠，不存在安全的"高分直答"阈值）；
+         *     JUDGE_DEGRADED=Judge 失败按降级策略处理（原因为 TIMEOUT/OVERLOADED/MODEL_ERROR/
+         *     INVALID_RESPONSE，见 decision reason 前缀）；ANSWERABILITY_DISABLED=判定关闭
+         *     （仅对照，行为同旧 RefusalPolicy）。
          * @enum {string}
          */
-        AnswerabilityDecisionType: "LOW_SCORE_REFUSAL" | "NO_HITS" | "HIGH_CONFIDENCE_ACCEPT" | "JUDGE_ACCEPT" | "JUDGE_REFUSE" | "JUDGE_DEGRADED" | "ANSWERABILITY_DISABLED";
+        AnswerabilityDecisionType: "LOW_SCORE_REFUSAL" | "NO_HITS" | "JUDGE_ACCEPT" | "JUDGE_REFUSE" | "JUDGE_DEGRADED" | "ANSWERABILITY_DISABLED";
         AnswerabilityDecision: {
             /** @description 判定结果：证据是否足以完整回答（true=进入生成） */
             answerable: boolean;
@@ -823,7 +826,7 @@ export interface components {
             confidence?: number | null;
             /** @description 决策原因（Judge 简述或门控说明）；未判定为 null。未调 Judge 时不会伪造 Judge reason */
             reason?: string | null;
-            /** @description 本次是否实际调用了 Judge（高分直答/低分直拒为 false） */
+            /** @description 本次是否实际调用了 Judge（门控直拒/零命中为 false） */
             judgeInvoked: boolean;
             /** @description Judge 是否失败降级（超时/不可用/解析失败）；降级行为由配置决定（failClosed=拒答 / failOpen=放行生成） */
             degraded: boolean;
