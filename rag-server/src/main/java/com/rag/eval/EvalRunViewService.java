@@ -101,6 +101,14 @@ public class EvalRunViewService {
         // R2-L1：检索/生成耗时拆分（旧数据为 null，契约声明 nullable）
         view.put("retrievalMs", item.getRetrievalMs());
         view.put("generationMs", item.getGenerationMs());
+        // R4：系统实际决策（V4 迁移起逐题落库；旧数据为 null）
+        view.put("refused", item.getRefused());
+        view.put("answerabilityDecisionType",
+                item.getAnswerabilityDecisionType() == null ? null : item.getAnswerabilityDecisionType().name());
+        view.put("answerabilityConfidence", item.getAnswerabilityConfidence());
+        view.put("answerabilityReason", item.getAnswerabilityReason());
+        view.put("answerabilityDegraded", item.getAnswerabilityDegraded());
+        view.put("answerabilityLatencyMs", item.getAnswerabilityLatencyMs());
         // R2-E2：正确答案分块的首个命中位次（对已落库 retrieved 快照复算，与指标口径同源）
         view.put("evidenceRank", evidenceRank(item, datasetItem));
         view.put("reviewTag", item.getReviewTag() == null ? null : item.getReviewTag().name());

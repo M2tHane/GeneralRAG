@@ -2,8 +2,10 @@ package com.rag.config;
 
 import java.time.Duration;
 
+import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import org.slf4j.Logger;
@@ -34,6 +36,26 @@ public class ModelClients {
                 .apiKey(chat.getApiKey())
                 .modelName(chat.getModelName())
                 .temperature(chat.getTemperature())
+                .timeout(Duration.ofSeconds(chat.getTimeoutSeconds()))
+                .build();
+    }
+
+    /**
+     * Evidence Sufficiency Judge 用的阻塞模型（R4）。
+     *
+     * <p>与生成同一个端点/模型名（本地部署场景下没有第二个模型可选），
+     * 但 temperature=0：判定要求确定性，不应采样发散。与生成模型是两个
+     * 独立实例——Judge 与生成 Prompt 互不污染（Judge 的输出不进入生成上下文，
+     * 生成的历史也不进入 Judge）。</p>
+     */
+    @Bean(name = "judgeChatModel")
+    public ChatModel judgeChatModel(RagProperties ragProperties) {
+        RagProperties.Chat chat = ragProperties.getModels().getChat();
+        return OpenAiChatModel.builder()
+                .baseUrl(chat.getBaseUrl())
+                .apiKey(chat.getApiKey())
+                .modelName(chat.getModelName())
+                .temperature(0.0)
                 .timeout(Duration.ofSeconds(chat.getTimeoutSeconds()))
                 .build();
     }

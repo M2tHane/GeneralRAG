@@ -66,3 +66,14 @@ runId：`724c30f1…`（数据库内可查，逐题含分阶段位次与 content
 - 本数据集只测**新格式解析 + 检索**，与 v2（4 篇 MD）分属不同 KB 语料，不可混跑对比；
 - 跨格式总量对比应在「同 KB、MD+新格式混合语料、合并数据集」下进行，属后续工作；
 - v2 数据集（`eval-test-v2-array.json` 等）仍是回归基线，不退役。
+
+---
+
+## 5. R4 补充：Answerability 专项集（answerability-v1）
+
+- 文件：`docs/eval/eval-answerability-v1-array.json`（生成器 `scripts/gen-answerability-dataset.py`）
+- 语料：KB `b78b6fb8`（R4-Answerability验证库）= 4 篇 MD + docx/xlsx/csv，7 文档 44 分块，全 STRUCTURE
+- 72 题：DIRECT 13 / TERM_VARIATION 9 / CONFUSABLE 18（12 false）/ OUT_OF_KB 14 /
+  PARTIAL_EVIDENCE 12（全 false）/ FOLLOW_UP 6；answerable=true 34 / false 38
+- 用途：Answerability 策略调优与新旧对照（TUNING 性质），不用于宣称通用检索能力
+- 详见 `docs/round4/02-实施记录.md` §6-§7

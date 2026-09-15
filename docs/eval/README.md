@@ -60,3 +60,10 @@
 
 - `docker compose up -d` 于 2026-09-14 启动：rag-mysql(3306)、rag-es(9200，首启自动安装 analysis-ik)、rag-minio(9000/9001)。
 - ES 镜像为 docker.elastic.co 官方 8.14.1（Docker Hub 无此 tag，已修正 docker-compose.yml 与 StorageIT 的镜像引用）。
+
+## 5. 第四轮数据集（answerability-v1）
+
+`eval-answerability-v1-array.json`：72 题 Answerability 专项 TUNING 集（CONFUSABLE/PARTIAL_EVIDENCE/
+OUT_OF_KB 合计 44 题），语料与运行留痕见 `docs/round4/02-实施记录.md`。
+指标口径升级：混淆矩阵（TP/FP/FN/TN）、False Answer Rate = FP/(FP+TN)、False Refusal Rate = FN/(FN+TP)、
+Judge 调用率/降级率/耗时，随 run metrics 的 `answerabilityConfusion` 键透出。

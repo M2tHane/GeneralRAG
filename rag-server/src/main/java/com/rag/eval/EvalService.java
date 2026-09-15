@@ -198,6 +198,12 @@ public class EvalService {
         configSnapshot.put("refusalEnabled", cfg.getRefusal().isEnabled());
         configSnapshot.put("refusalRerankThreshold", cfg.getRefusal().getRerankThreshold());
         configSnapshot.put("refusalCosineThreshold", cfg.getRefusal().getCosineThreshold());
+        // R4：Answerability 判定配置也是评测口径（开/关与降级策略会显著改变混淆矩阵）
+        configSnapshot.put("answerabilityEnabled", cfg.getAnswerability().isEnabled());
+        configSnapshot.put("answerabilityJudgeModel", cfg.getAnswerability().isEnabled()
+                ? ragProperties.getModels().getChat().getModelName() : "");
+        configSnapshot.put("answerabilityFailClosed", cfg.getAnswerability().isFailClosed());
+        configSnapshot.put("answerabilityJudgeTimeoutSeconds", cfg.getAnswerability().getJudgeTimeoutSeconds());
         // EV-4 分块配置：评测对象知识库内各文档实际使用的策略/参数（同名键集合，多文档混合可见差异）
         Map<String, Object> chunkStrategies = new LinkedHashMap<>();
         Map<String, Object> chunkMaxLengths = new LinkedHashMap<>();

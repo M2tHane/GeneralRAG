@@ -702,11 +702,14 @@ export interface components {
         QAStreamEvent: components["schemas"]["StreamEventStage"] | components["schemas"]["StreamEventToken"] | components["schemas"]["StreamEventCitations"] | components["schemas"]["StreamEventDone"] | components["schemas"]["StreamEventError"] | components["schemas"]["StreamEventCanceled"];
         StreamEventStage: {
             /**
-             * @description 仅报真实发生的阶段（QA-4）
+             * @description 仅报真实发生的阶段（QA-4）。ANSWERABILITY_CHECKED（R4）在
+             *     RETRIEVAL_COMPLETED 之后、GENERATION_STARTED 之前发出，表示证据充分性
+             *     判定完成；拒答流没有 GENERATION_STARTED。客户端必须容忍未知 stage
+             *     （只展示，不解析载荷语义）。
              * @enum {string}
              */
-            stage: "RETRIEVAL_STARTED" | "RETRIEVAL_COMPLETED" | "GENERATION_STARTED";
-            /** @description 如 “命中 6 块 · 128ms” */
+            stage: "RETRIEVAL_STARTED" | "RETRIEVAL_COMPLETED" | "ANSWERABILITY_CHECKED" | "GENERATION_STARTED";
+            /** @description 如 “命中 6 块 · 128ms”；ANSWERABILITY_CHECKED 为 “证据充分性判定：可回答 · Judge 812ms” 之类的简述（不含 confidence/reason，详见调试与评测接口） */
             detail?: string;
             elapsedMs?: number;
         };
@@ -803,6 +806,30 @@ export interface components {
             type: "NO_HITS" | "ALL_BELOW_THRESHOLD" | "CONTEXT_TRUNCATED" | "RERANK_DEGRADED";
             message: string;
         };
+        /**
+         * @description Answerability 决策类型（R4）。回答/拒答的<b>原因</b>，供调试与评测归因：
+         *     LOW_SCORE_REFUSAL=低于低分阈值直接拒答（未调 Judge）；NO_HITS=零命中直接拒答；
+         *     HIGH_CONFIDENCE_ACCEPT=高于高分阈值直接生成（未调 Judge）；JUDGE_ACCEPT/JUDGE_REFUSE=
+         *     灰区由 Evidence Sufficiency Judge 判定；JUDGE_DEGRADED=Judge 失败按降级策略处理；
+         *     ANSWERABILITY_DISABLED=判定关闭（仅对照，行为同旧 RefusalPolicy）。
+         * @enum {string}
+         */
+        AnswerabilityDecisionType: "LOW_SCORE_REFUSAL" | "NO_HITS" | "HIGH_CONFIDENCE_ACCEPT" | "JUDGE_ACCEPT" | "JUDGE_REFUSE" | "JUDGE_DEGRADED" | "ANSWERABILITY_DISABLED";
+        AnswerabilityDecision: {
+            /** @description 判定结果：证据是否足以完整回答（true=进入生成） */
+            answerable: boolean;
+            decisionType: components["schemas"]["AnswerabilityDecisionType"];
+            /** @description Judge 置信度 [0,1]；未调 Judge 为 null */
+            confidence?: number | null;
+            /** @description 决策原因（Judge 简述或门控说明）；未判定为 null。未调 Judge 时不会伪造 Judge reason */
+            reason?: string | null;
+            /** @description 本次是否实际调用了 Judge（高分直答/低分直拒为 false） */
+            judgeInvoked: boolean;
+            /** @description Judge 是否失败降级（超时/不可用/解析失败）；降级行为由配置决定（failClosed=拒答 / failOpen=放行生成） */
+            degraded: boolean;
+            /** @description 判定耗时（毫秒，含 Judge 调用）；门控路径为门控本身耗时（≈0） */
+            latencyMs?: number | null;
+        };
         DebugRetrievalResult: {
             effectiveConfig: {
                 topK: number;
@@ -824,6 +851,10 @@ export interface components {
                 rerankDegraded?: boolean;
                 /** @description 降级原因 */
                 rerankDegradeReason?: string | null;
+                /** @description Answerability 判定是否启用（R4） */
+                answerabilityEnabled?: boolean;
+                /** @description Evidence Sufficiency Judge 使用的模型名；未启用时为空串 */
+                judgeModel?: string;
             };
             hits: components["schemas"]["RetrievalHit"][];
             timings: components["schemas"]["DebugTimings"];
@@ -833,6 +864,12 @@ export interface components {
                 charCount: number;
                 chunkIds: string[];
             };
+            /**
+             * @description 证据充分性判定结果（R4）。Answerability 关闭时为 null——
+             *     此时调试页只反映检索行为，不虚构判定。判定输入即 context.text
+             *     对应的分块集合（与生成上下文一致，无第二套 Evidence）。
+             */
+            answerability?: components["schemas"]["AnswerabilityDecision"] | null;
             issues: components["schemas"]["DebugIssue"][];
         };
         /**
@@ -840,8 +877,13 @@ export interface components {
          * @enum {string}
          */
         DatasetType: "TUNING" | "TEST";
-        /** @enum {string} */
-        EvalCategory: "DIRECT" | "TERM_VARIATION" | "FOLLOW_UP" | "OUT_OF_KB" | "CONFUSABLE";
+        /**
+         * @description PARTIAL_EVIDENCE（R4 Answerability 轮新增）：语料只覆盖问题要求的部分答案
+         *     （如问 A/B/C 三方案优缺点而语料只有 A/B），即使检索高度相关，
+         *     expected answerable=false——证据不足以完整回答。
+         * @enum {string}
+         */
+        EvalCategory: "DIRECT" | "TERM_VARIATION" | "FOLLOW_UP" | "OUT_OF_KB" | "CONFUSABLE" | "PARTIAL_EVIDENCE";
         EvidenceRef: {
             docName?: string;
             titlePath?: string;
@@ -915,8 +957,46 @@ export interface components {
             /**
              * @description R2-E3 拒答正确率 = (answerable=false 且拒答 + answerable=true 且未拒答) / 已执行题数。
              *     与 Hit@K 分列：资料外题的"是否安全拒答"不再因退出 Hit@K 分母而消失。
+             *     R4 起细化为混淆矩阵指标（见 answerabilityConfusion），本字段保留兼容。
              */
             refusalAccuracy?: number | null;
+            /**
+             * @description R4 Answerability 混淆矩阵与派生指标（按已执行题计；执行失败题不计入任何格）。
+             *     TP=应答且答，FP=不应答却答（False Answer，企业知识库中风险最高的错误），
+             *     FN=应答却拒，TN=不应答且拒。
+             *     falseAnswerRate = FP/(FP+TN)：实际不可回答的问题中被错误回答的比例；
+             *     falseRefusalRate = FN/(FN+TP)：实际可回答的问题中被错误拒答的比例；
+             *     answerablePrecision = TP/(TP+FP)；answerableRecall = TP/(TP+FN)；
+             *     refusalPrecision = TN/(TN+FN)；refusalRecall = TN/(TN+FP)。
+             */
+            answerabilityConfusion?: {
+                tp: number;
+                fp: number;
+                fn: number;
+                tn: number;
+                falseAnswerRate?: number | null;
+                falseRefusalRate?: number | null;
+                answerablePrecision?: number | null;
+                answerableRecall?: number | null;
+                refusalPrecision?: number | null;
+                refusalRecall?: number | null;
+                /** @description 调用了 Judge 的题数 / 已执行题数（成本指标；未启用 Answerability 为 null） */
+                judgeInvocationRate?: number | null;
+                /** @description Judge 降级的题数 / 已调 Judge 的题数（可用性指标；未调 Judge 为 null） */
+                judgeDegradedRate?: number | null;
+                /** @description Judge 平均耗时（毫秒）；未调 Judge 为 null */
+                judgeLatencyMsAvg?: number | null;
+                /** @description 按 category 拆分的 {expectedAnswerable, refused, fpOrFn} 计数，便于定位哪类题出问题 */
+                categoryBreakdown?: {
+                    [key: string]: {
+                        expectedAnswerable?: boolean;
+                        /** @description 该类中被系统拒答的题数 */
+                        refused?: number;
+                        /** @description 该类中判定错误的题数（应答被拒 + 不应答被答） */
+                        misjudged?: number;
+                    };
+                } | null;
+            } | null;
             /** @description R2-E2 正确答案排名分布；键为 "1".."5" 与 "notFound" */
             rankDistribution?: {
                 [key: string]: number;
@@ -1018,6 +1098,21 @@ export interface components {
             retrievalMs?: number | null;
             /** @description 该题生成耗时（R2-L1）；拒答路径未调用模型，约为 0 */
             generationMs?: number | null;
+            /**
+             * @description R4：系统是否拒答（Answerability 判定或关闭态下的旧阈值判定）。
+             *     此前只能靠回答文案反推；V4 迁移起逐题落库。旧数据/未执行为 null。
+             */
+            refused?: boolean | null;
+            /** @description R4 决策类型（AnswerabilityDecisionType 枚举值）；旧数据为 null */
+            answerabilityDecisionType?: string | null;
+            /** @description R4 Judge 置信度；未调 Judge 为 null */
+            answerabilityConfidence?: number | null;
+            /** @description R4 决策原因简述（截断 500 字符） */
+            answerabilityReason?: string | null;
+            /** @description R4 Judge 是否失败降级 */
+            answerabilityDegraded?: boolean | null;
+            /** @description R4 判定耗时（毫秒） */
+            answerabilityLatencyMs?: number | null;
             /**
              * @description 人工标记的失败原因；未标注为 null
              * @enum {string|null}

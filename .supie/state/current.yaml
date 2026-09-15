@@ -2,106 +2,44 @@
   "schema": 1,
   "flow": "supie-dev",
   "mode": "standard",
-  "status": "running",
-  "goal": "第二轮：检索与效果优化（BM25+向量双通道 → RRF 融合 → 重排；评测对比页；按 BadCase 决定查询改写）+ 第一轮 3 个调优点修复（OUT_OF_KB citations、标题编号重复、长题延迟）",
-  "baseline": "round1-completed (no git; state archive .supie/state/archive/round1-completed-20260914.yaml)",
-  "current_stage": 2,
+  "status": "completed",
+  "goal": "第四轮：Evidence Answerability（两阶段门控 + 灰区 LLM Judge）——72 题专项集 + Baseline 分析 + AnswerabilityPolicy 实现 + A/B 对照",
+  "baseline": "round3-completed (git 94dc5f4 pushed; archive .supie/state/archive/)",
+  "current_stage": 6,
   "stages": {
-    "1": {
-      "status": "completed",
-      "approved": true,
-      "artifact": "docs/round2/01-需求理解.md",
-      "note": "用户批准。默认取值采纳：Q1 只修分块级判定不扩语料；Q2 重排默认开启+失败降级；Q3 拒答即清空引用；Q4 固定2次运行对比。范围=完整 MVP（A+B+C）。§0.1 路线图偏离（生成类指标移入 Later）获准；§7.1 锚点键留给 Stage 3 定"
-    },
-    "2": {
-      "status": "in_progress",
-      "note": "Stage 2A 页面结构与视觉方向 → 2B 可交互原型 → 2C 走查"
-    }
-  },
-  "tasks": {
-    "stage1-advocates": {
-      "status": "completed",
-      "note": "req-user-advocate + req-dev-advocate 双视角论证完成"
-    },
-    "stage1-doc-review": {
-      "status": "completed",
-      "note": "spec-document-reviewer APPROVE-WITH-FIXES；7 项必改已全部修复"
-    },
-    "stage2-shared-foundation": {
-      "status": "completed",
-      "note": "data.js/ui.js/styles.css/index.html：4 项导航+第二轮模拟数据+CSS 类；指标由逐题数据推导（非手写）"
-    },
-    "stage2-pages": {
-      "status": "completed",
-      "note": "eval.html/eval-run.html/debug.html/doc-detail.html/chat.html 完成"
-    },
-    "user-override-direct-impl": {
-      "status": "completed",
-      "note": "用户指示：跳过 supie-dev 后续关口，直接实现+测试，测通后再停。UX/契约/迁移决策由 Agent 按 Stage1 需求默认值执行"
-    },
-    "r2-implementation": {
-      "status": "completed",
-      "note": "R2 全部实现：混合检索+RRF+重排+降级、拒答双阈值、分块级判定+新指标、统一检索组件、契约+V2 迁移、前端评测页"
-    }
+    "1": {"status": "completed", "approved": true, "note": "用户以长篇需求直接批准方案：B+A 排除 C；数据集先行→Baseline→分析→实现→A/B 的严格顺序"},
+    "2": {"status": "skipped", "note": "无新页面/旅程（复用既有评测/调试页，仅加字段），用户明示直接实现"},
+    "3": {"status": "completed", "approved": true, "note": "contracts/openapi.yaml 更新（EvalCategory/SSE stage/Debug answerability/混淆矩阵/refused 落库），用户批准的方案内"},
+    "5": {"status": "completed", "note": "V4__answerability_eval.sql（category CHECK 扩展 + eval_run_item 决策 6 列）"},
+    "6": {"status": "completed", "note": "AnswerabilityPolicy/Judge/Chat/Debug/Eval 全链路 + 25 新单测 + 回归 182/182 + A/B 对照完成"}
   },
   "verification": [
     {
-      "label": "stage1-live-facts",
+      "label": "r4-backend-tests",
       "result": "pass",
-      "at": "2026-09-14T19:23:34+08:00",
-      "command": "curl ES license/RRF; curl dashscope rerank; ES title_path dump vs eval evidence",
-      "note": "E1/E3/E4/E5/E7/E8/E11 主 Agent 独立复现；E6/E9 降级标注"
+      "at": "2026-09-15T23:30:00+08:00",
+      "command": "mvn test ×2 → 182/182 稳定（+25 新测试：AnswerabilityPolicyTest 12 / EvidenceSufficiencyJudgeTest 13）"
     },
     {
-      "label": "stage2-browser-walkthrough",
+      "label": "r4-frontend",
       "result": "pass",
-      "at": "2026-09-14T20:43:46+08:00",
-      "command": "browser-use IAB：eval/eval-run/debug/chat/doc-detail 走查；1440x900 + 768x1024 + 375x812；深色模式",
-      "note": "走查抓到并修复 3 个真实缺陷：delta 箭头与数值方向矛盾（耗时 ▲+1290ms 曾显示 ▼）、评测表列宽被压成逐字换行+操作列溢出、失败原因溢出状态列；另修正降级文案invented规则"
+      "at": "2026-09-15T23:35:00+08:00",
+      "command": "pnpm test 30/30; pnpm lint 0 warning; pnpm build 9 路由"
     },
     {
-      "label": "r2-backend-tests",
+      "label": "r4-smoke-real",
       "result": "pass",
-      "at": "2026-09-14T23:04:43+08:00",
-      "command": "mvn test → 130/130（3 次连跑稳定；+21 新测试）",
-      "note": "RrfFusion/RefusalPolicy/EvidenceMatcher/Chunker 精确断言/契约漂移"
+      "at": "2026-09-15T23:45:00+08:00",
+      "command": "真实模型 4 例 debug 冒烟 + 2 例 SSE 流冒烟（事件序列/拒答 citations=[]）"
     },
     {
-      "label": "r2-frontend",
+      "label": "r4-ab-eval",
       "result": "pass",
-      "at": "2026-09-14T23:04:43+08:00",
-      "command": "pnpm test 30/30; pnpm lint 0 warning; pnpm build 9 路由成功",
-      "note": "新增 /eval /eval/[runId]；修复 SSE error 载荷解析错位（第一轮遗留）"
-    },
-    {
-      "label": "r2-e2e-real",
-      "result": "pass",
-      "at": "2026-09-14T23:04:43+08:00",
-      "command": "真实中间件+真模型：重入库(标题路径 0 重复)、VECTOR vs HYBRID_RERANK 对照(Hit@1 0.5→1.0, MRR 0.708→1.0, 拒答 0.8→1.0, 检索 344→553ms)、重排降级实测、拒答 citations=[] 实测、浏览器走查",
-      "note": "runId: VECTOR=84c80eae HYBRID_RERANK=31dfe566；详见 docs/round2/02-实施记录.md"
-    },
-    {
-      "label": "r2-backend-tests",
-      "result": "pass",
-      "at": "2026-09-14T23:04:58+08:00",
-      "command": "mvn test → 130/130（3 次连跑稳定；+21 新测试）",
-      "note": "RrfFusion/RefusalPolicy/EvidenceMatcher/Chunker 精确断言/契约漂移"
-    },
-    {
-      "label": "r2-frontend",
-      "result": "pass",
-      "at": "2026-09-14T23:04:58+08:00",
-      "command": "pnpm test 30/30; pnpm lint 0 warning; pnpm build 9 路由",
-      "note": "新增 /eval 与 /eval/[runId]；修复 SSE error 载荷解析错位（第一轮遗留）"
-    },
-    {
-      "label": "r2-e2e-real",
-      "result": "pass",
-      "at": "2026-09-14T23:04:58+08:00",
-      "command": "真实中间件+真模型端到端（重入库/对照实验/降级/拒答/浏览器走查）",
-      "note": "VECTOR Hit@1=0.50 vs HYBRID_RERANK=1.00；检索 344→553ms；runId 见 docs/round2/02-实施记录.md"
+      "at": "2026-09-15T23:55:00+08:00",
+      "command": "Baseline c85c4c50 vs 新策略 aabf8eb7（72 题）：FAR 47.4%→10.5%，FRR 0→5.9%，检索指标零变化",
+      "note": "详见 docs/round4/02-实施记录.md"
     }
   ],
-  "started_at": "2026-09-14T18:46:49+08:00",
-  "updated_at": "2026-09-14T23:04:58+08:00"
+  "started_at": "2026-09-15T22:00:00+08:00",
+  "updated_at": "2026-09-15T23:55:00+08:00"
 }

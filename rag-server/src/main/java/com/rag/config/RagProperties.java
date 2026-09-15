@@ -265,6 +265,10 @@ public class RagProperties {
         @NotNull
         private Refusal refusal = new Refusal();
 
+        @Valid
+        @NotNull
+        private Answerability answerability = new Answerability();
+
         public int getTopK() {
             return topK;
         }
@@ -319,6 +323,14 @@ public class RagProperties {
 
         public void setRefusal(Refusal refusal) {
             this.refusal = refusal;
+        }
+
+        public Answerability getAnswerability() {
+            return answerability;
+        }
+
+        public void setAnswerability(Answerability answerability) {
+            this.answerability = answerability;
         }
     }
 
@@ -469,6 +481,74 @@ public class RagProperties {
 
         public void setCosineThreshold(double cosineThreshold) {
             this.cosineThreshold = cosineThreshold;
+        }
+    }
+
+    /**
+     * Answerability 判定参数（R4）。
+     *
+     * <p><b>门控形态来自 Baseline 数据（docs/round4/01-Baseline分析.md），非经验值</b>：
+     * 72 题专项集上 PARTIAL_EVIDENCE 与可答题的 rerank 分布完全重叠（两类都有 1.000），
+     * 不存在安全的"高分直答"阈值——故只有 lowThreshold（沿用旧双阈值校准），
+     * 低于它直接拒答，其余全部交 Judge。</p>
+     */
+    public static class Answerability {
+
+        /** 是否启用 Answerability 判定（关闭 = 旧行为，仅对照）。 */
+        private boolean enabled = true;
+
+        /**
+         * Judge 失败（超时/不可用/解析失败）时的降级策略：true=按旧阈值行为保守拒答，
+         * false=放行生成（degrade to previous policy：按 rerank/cosine 阈值判定并显式标注）。
+         * Baseline 数据（§7）：灰区全拒会把 34 道可答题全拒（FRR 100%），全放行回到
+         * FAR 35% 的旧行为——默认 false（退回旧策略判定），误判上界=旧系统，可观测。
+         */
+        private boolean failClosed = false;
+
+        /**
+         * Judge 判定超时（秒）。Judge 在生成前串行执行，超时太长会拖垮问答首 token；
+         * 取 chat timeout 的约 1/6（chat 默认 120s，Judge 只需输出短 JSON）。
+         */
+        @Min(value = 1, message = "rag.answerability.judge-timeout-seconds 必须 ≥ 1")
+        private int judgeTimeoutSeconds = 15;
+
+        /**
+         * Judge 输入的证据字符上限（从 ContextAssembler 产物截取）。与生成上下文
+         * 保持同源一致（Context.text），超长截断降低 token 成本。
+         */
+        @Min(value = 200, message = "rag.answerability.max-evidence-chars 必须 ≥ 200")
+        private int maxEvidenceChars = 4000;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public boolean isFailClosed() {
+            return failClosed;
+        }
+
+        public void setFailClosed(boolean failClosed) {
+            this.failClosed = failClosed;
+        }
+
+        public int getJudgeTimeoutSeconds() {
+            return judgeTimeoutSeconds;
+        }
+
+        public void setJudgeTimeoutSeconds(int judgeTimeoutSeconds) {
+            this.judgeTimeoutSeconds = judgeTimeoutSeconds;
+        }
+
+        public int getMaxEvidenceChars() {
+            return maxEvidenceChars;
+        }
+
+        public void setMaxEvidenceChars(int maxEvidenceChars) {
+            this.maxEvidenceChars = maxEvidenceChars;
         }
     }
 

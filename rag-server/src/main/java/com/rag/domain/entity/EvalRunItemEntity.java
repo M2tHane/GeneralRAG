@@ -10,6 +10,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.type.SqlTypes;
 
+import com.rag.answerability.AnswerabilityDecisionType;
 import com.rag.domain.enums.ReviewTag;
 
 import jakarta.persistence.Column;
@@ -75,6 +76,31 @@ public class EvalRunItemEntity {
     /** R2-L1：该题生成耗时（毫秒）；拒答未调用模型时为约 0。 */
     @Column(name = "generation_ms")
     private Integer generationMs;
+
+    /** R4：系统是否拒答（判定落库，此前只能靠回答文案反推）。NULL=未执行或旧数据。 */
+    @Column(name = "refused")
+    private Boolean refused;
+
+    /** R4：Answerability 决策类型（枚举名）；NULL=未执行或旧数据。 */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "answerability_decision_type", length = 40)
+    private AnswerabilityDecisionType answerabilityDecisionType;
+
+    /** R4：Judge 置信度；未调 Judge 为 NULL。 */
+    @Column(name = "answerability_confidence")
+    private Double answerabilityConfidence;
+
+    /** R4：决策原因简述（截断 500）。 */
+    @Column(name = "answerability_reason", length = 500)
+    private String answerabilityReason;
+
+    /** R4：Judge 是否失败降级；未调 Judge 为 false。 */
+    @Column(name = "answerability_degraded")
+    private Boolean answerabilityDegraded;
+
+    /** R4：判定耗时（毫秒）。 */
+    @Column(name = "answerability_latency_ms")
+    private Integer answerabilityLatencyMs;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "review_tag", length = 20)
@@ -184,6 +210,54 @@ public class EvalRunItemEntity {
 
     public void setGenerationMs(Integer generationMs) {
         this.generationMs = generationMs;
+    }
+
+    public Boolean getRefused() {
+        return refused;
+    }
+
+    public void setRefused(Boolean refused) {
+        this.refused = refused;
+    }
+
+    public AnswerabilityDecisionType getAnswerabilityDecisionType() {
+        return answerabilityDecisionType;
+    }
+
+    public void setAnswerabilityDecisionType(AnswerabilityDecisionType answerabilityDecisionType) {
+        this.answerabilityDecisionType = answerabilityDecisionType;
+    }
+
+    public Double getAnswerabilityConfidence() {
+        return answerabilityConfidence;
+    }
+
+    public void setAnswerabilityConfidence(Double answerabilityConfidence) {
+        this.answerabilityConfidence = answerabilityConfidence;
+    }
+
+    public String getAnswerabilityReason() {
+        return answerabilityReason;
+    }
+
+    public void setAnswerabilityReason(String answerabilityReason) {
+        this.answerabilityReason = answerabilityReason;
+    }
+
+    public Boolean getAnswerabilityDegraded() {
+        return answerabilityDegraded;
+    }
+
+    public void setAnswerabilityDegraded(Boolean answerabilityDegraded) {
+        this.answerabilityDegraded = answerabilityDegraded;
+    }
+
+    public Integer getAnswerabilityLatencyMs() {
+        return answerabilityLatencyMs;
+    }
+
+    public void setAnswerabilityLatencyMs(Integer answerabilityLatencyMs) {
+        this.answerabilityLatencyMs = answerabilityLatencyMs;
     }
 
     public ReviewTag getReviewTag() {

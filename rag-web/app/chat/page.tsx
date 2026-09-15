@@ -196,8 +196,29 @@ export default function ChatPage() {
                       : line
                   )
                 );
+              } else if (e.stage === "ANSWERABILITY_CHECKED") {
+                upStage((ls) =>
+                  ls.map((line, i) =>
+                    i === ls.length - 1 && line.state === "run"
+                      ? { text: `完成 · ${e.detail ?? "检索完成"}`, state: "done" }
+                      : line
+                  )
+                );
+                upStage((ls) => [...ls, { text: "证据充分性判定…", state: "run" }]);
               } else if (e.stage === "GENERATION_STARTED") {
-                upStage((ls) => [...ls, { text: "生成中…", state: "run" }]);
+                // 判定行收尾并开"生成中…"；无判定行时（关闭 Answerability）沿用原行为
+                upStage((ls) => {
+                  const last = ls[ls.length - 1];
+                  const closed =
+                    last && last.state === "run" && last.text === "证据充分性判定…"
+                      ? [...ls.slice(0, -1), { text: "判定完成", state: "done" as const }]
+                      : ls.map((line, i) =>
+                          i === ls.length - 1 && line.state === "run"
+                            ? { text: `完成 · ${e.detail ?? "证据可用"}`, state: "done" as const }
+                            : line
+                        );
+                  return [...closed, { text: "生成中…", state: "run" as const }];
+                });
               }
             },
             onToken: (e) =>

@@ -3,6 +3,8 @@ package com.rag.debug;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.rag.answerability.AnswerabilityDecision;
+import com.rag.answerability.AnswerabilityPolicy;
 import com.rag.config.RagProperties;
 import com.rag.retrieval.ContextAssembler;
 import com.rag.retrieval.RetrievalPipeline;
@@ -16,7 +18,7 @@ import com.rag.storage.es.EsHit;
 import org.springframework.stereotype.Service;
 
 /**
- * 检索调试服务（Task 6 → R2-D2 重构）。
+ * 检索调试服务（Task 6 → R2-D2 重构 → R4 Answerability 扩展）。
  *
  * <p>第一轮本类为拿到分段耗时，逐行复刻了 {@code RetrievalService} 的检索语义，
  * 只靠一致性测试守护。第二轮改造后检索语义唯一收敛在
@@ -24,6 +26,11 @@ import org.springframework.stereotype.Service;
  * {@link RetrievalPipeline.RetrievalDiagnostics} 映射为调试响应 DTO。</p>
  *
  * <p>因此"调试页与问答/评测结果一致"不再依赖两个实现保持同步，而是同一实现。</p>
+ *
+ * <p>R4：调试接口补齐<b>证据充分性判定</b>——与问答/评测共用
+ * {@link AnswerabilityPolicy}，判定输入就是本响应中 context.text 的分块集合
+ * （与生成上下文同源）。由此一条 Bad Case 的完整归因链可观测：
+ * 召回（hits）→ 排序（stages）→ 证据（context）→ 判定（answerability）→ 生成。</p>
  */
 @Service
 public class DebugRetrievalService {
@@ -31,17 +38,20 @@ public class DebugRetrievalService {
     private final RetrievalService retrievalService;
     private final ContextAssembler contextAssembler;
     private final RagProperties ragProperties;
+    private final AnswerabilityPolicy answerabilityPolicy;
 
     public DebugRetrievalService(RetrievalService retrievalService,
                                  ContextAssembler contextAssembler,
-                                 RagProperties ragProperties) {
+                                 RagProperties ragProperties,
+                                 AnswerabilityPolicy answerabilityPolicy) {
         this.retrievalService = retrievalService;
         this.contextAssembler = contextAssembler;
         this.ragProperties = ragProperties;
+        this.answerabilityPolicy = answerabilityPolicy;
     }
 
     /**
-     * 调试检索：复用统一流水线，输出分段耗时 + 分阶段位次 + 上下文。
+     * 调试检索：复用统一流水线，输出分段耗时 + 分阶段位次 + 上下文 + Answerability 判定。
      *
      * @param modeOverride 检索模式覆盖（null = 取配置）
      */
@@ -57,9 +67,16 @@ public class DebugRetrievalService {
         List<RetrievalHit> passed = ranked.stream().filter(RetrievalHit::passedThreshold).toList();
         Context context = contextAssembler.assemble(passed);
 
+        // R4：与问答同一条判定路径——低分直拒 → Judge；判定输入=同源 Context
+        AnswerabilityDecision decision = answerabilityPolicy.evaluate(
+                ranked, diag.mode(), diag.rerankApplied(), question, context.text());
+
         RagProperties.Rerank rerankCfg = ragProperties.getRetrieval().getRerank();
         boolean rerankEnabled = diag.mode() == RetrievalMode.HYBRID_RERANK;
         String rerankModel = rerankEnabled ? rerankCfg.getModelName() : "";
+        boolean answerabilityEnabled = ragProperties.getRetrieval().getAnswerability().isEnabled();
+        String judgeModel = answerabilityEnabled
+                ? ragProperties.getModels().getChat().getModelName() : "";
 
         return new DebugResult.DebugRetrievalResult(
                 new DebugResult.EffectiveConfig(diag.topK(), diag.minScore(),
@@ -68,12 +85,21 @@ public class DebugRetrievalService {
                         ragProperties.getModels().getChat().getModelName(),
                         diag.mode().name(), diag.candidateLimit(), diag.rrfK(),
                         rerankModel, rerankEnabled, diag.rerankDegraded(),
-                        diag.rerankDegradeReason()),
+                        diag.rerankDegradeReason(),
+                        answerabilityEnabled, judgeModel),
                 ranked.stream().map(DebugRetrievalService::toPayload).toList(),
                 new DebugResult.Timings(diag.embedMs(), diag.searchMs(), diag.totalMs()),
                 new DebugResult.ContextPayload(context.text(), context.charCount(),
                         context.chunkIds()),
+                toDebugDecision(decision),
                 buildIssues(ranked, context, diag));
+    }
+
+    /** 契约 AnswerabilityDecision 映射（决策关闭时传 null，不虚构判定）。 */
+    private static DebugResult.AnswerabilityDecisionPayload toDebugDecision(AnswerabilityDecision d) {
+        return new DebugResult.AnswerabilityDecisionPayload(
+                d.answerable(), d.decisionType().name(), d.confidence(), d.reason(),
+                d.judgeInvoked(), d.degraded(), d.latencyMs());
     }
 
     /** 兼容旧签名（第一轮调用点/测试）：默认模式。 */

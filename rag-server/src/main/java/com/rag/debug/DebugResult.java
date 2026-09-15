@@ -21,12 +21,15 @@ public final class DebugResult {
      * @param rerankEnabled 本次是否会调用重排
      * @param rerankDegraded 本次是否发生重排降级（重排未生效）
      * @param rerankDegradeReason 降级原因（未降级为 null）
+     * @param answerabilityEnabled Answerability 判定是否启用（R4）
+     * @param judgeModel Evidence Sufficiency Judge 使用的模型名（未启用时为空串）
      */
     public record EffectiveConfig(int topK, double minScore, String embeddingModel,
                                   int dimensions, String chatModel, String mode,
                                   int candidateLimit, int rrfK, String rerankModel,
                                   boolean rerankEnabled, boolean rerankDegraded,
-                                  String rerankDegradeReason) {
+                                  String rerankDegradeReason,
+                                  boolean answerabilityEnabled, String judgeModel) {
     }
 
     /** 契约 Chunk 结构（EsHit 字段名 → 契约名映射：chunkId→id、content→text）。 */
@@ -64,7 +67,26 @@ public final class DebugResult {
     public record Issue(String type, String message) {
     }
 
+    /**
+     * 契约 AnswerabilityDecision（R4）：证据充分性判定结果。
+     *
+     * @param answerable   证据是否足以完整回答
+     * @param decisionType 决策类型（AnswerabilityDecisionType 枚举名）
+     * @param confidence   Judge 置信度；未调 Judge 为 null
+     * @param reason       决策原因；未调 Judge 时是门控说明（不伪造 Judge reason）
+     * @param judgeInvoked 是否实际调用了 Judge
+     * @param degraded     Judge 是否失败降级
+     * @param latencyMs    判定耗时（毫秒）
+     */
+    public record AnswerabilityDecisionPayload(boolean answerable, String decisionType,
+                                               Double confidence, String reason,
+                                               boolean judgeInvoked, boolean degraded,
+                                               long latencyMs) {
+    }
+
     public record DebugRetrievalResult(EffectiveConfig effectiveConfig, List<HitPayload> hits,
-                                       Timings timings, ContextPayload context, List<Issue> issues) {
+                                       Timings timings, ContextPayload context,
+                                       AnswerabilityDecisionPayload answerability,
+                                       List<Issue> issues) {
     }
 }

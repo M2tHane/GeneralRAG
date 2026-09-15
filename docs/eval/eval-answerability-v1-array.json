@@ -1,0 +1,777 @@
+[
+ {
+  "question": "Redis 中 AOF 的 fsync 默认策略是哪一种？",
+  "answerable": true,
+  "category": "DIRECT",
+  "referenceAnswer": "everysec（每秒 fsync），既是默认也是官方建议策略。",
+  "evidence": [
+   {
+    "docName": "redis-persistence.md",
+    "titlePath": "redis-persistence.md > 1.3.1. 三种 fsync 策略（appendfsync）",
+    "chunkId": "7f701112-3dbc-405b-95b9-c2eabd95d55b-c0005",
+    "contentHash": "b17e5488dd0f38e4",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "Elasticsearch 集群健康状态为 red 意味着什么？",
+  "answerable": true,
+  "category": "DIRECT",
+  "referenceAnswer": "存在未分配的主分片，部分数据不可用。",
+  "evidence": [
+   {
+    "docName": "elasticsearch-cluster-health.md",
+    "titlePath": "elasticsearch-cluster-health.md > 1.1. 集群健康状态",
+    "chunkId": "91cd8c45-ad97-4a18-879f-adb4f17b107a-c0002",
+    "contentHash": "1882d9bb82b64858",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "ES 节点磁盘使用率达到 flood_stage 水位（默认 95%）后会发生什么？",
+  "answerable": true,
+  "category": "DIRECT",
+  "referenceAnswer": "节点上的索引被加 index.blocks.read_only_allow_delete 块，拒绝写入（仅允许删除）。",
+  "evidence": [
+   {
+    "docName": "elasticsearch-cluster-health.md",
+    "titlePath": "elasticsearch-cluster-health.md > 1.2. 磁盘水位三阶段",
+    "chunkId": "91cd8c45-ad97-4a18-879f-adb4f17b107a-c0003",
+    "contentHash": "a14f7aabd0600de7",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "Kafka 消费者组的 Consumer Lag 是怎么定义的？",
+  "answerable": true,
+  "category": "DIRECT",
+  "referenceAnswer": "分区日志最新位移（LEO）− 消费者已提交/已消费位移，单位是消息数，分区级监控。",
+  "evidence": [
+   {
+    "docName": "kafka-consumer-groups.md",
+    "titlePath": "kafka-consumer-groups.md > 1.3. 消费位移与 Lag",
+    "chunkId": "ea86ba36-b94a-4fbd-b0df-22ec9cf9193e-c0004",
+    "contentHash": "f62ed3c0c8fa027e",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "nginx 的 proxy_buffering 指令默认是开启还是关闭？",
+  "answerable": true,
+  "category": "DIRECT",
+  "referenceAnswer": "默认 on（开启缓冲），可配置在 http/server/location 上下文。",
+  "evidence": [
+   {
+    "docName": "nginx-proxy-buffering.md",
+    "titlePath": "nginx-proxy-buffering.md > 1.1. proxy_buffering 的行为",
+    "chunkId": "d2bbbd13-bc71-4ca8-b602-ec2d93bcb3b8-c0002",
+    "contentHash": "5c734c885adef07b",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "nginx 的 proxy_read_timeout 默认是多少秒？超时后会发生什么？",
+  "answerable": true,
+  "category": "DIRECT",
+  "referenceAnswer": "默认 60s；两次成功读操作之间的最大间隔，超时则关闭连接。",
+  "evidence": [
+   {
+    "docName": "nginx-proxy-guide.docx",
+    "titlePath": "nginx-proxy-guide.docx > 1.2. 关键超时参数",
+    "chunkId": "31ec47ff-583f-4070-8c0e-1d0c5a66e32c-c0003",
+    "contentHash": "0ed541d440505063",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "HikariCP 的 maxLifetime 默认值是多少？",
+  "answerable": true,
+  "category": "DIRECT",
+  "referenceAnswer": "1800000 ms（30 分钟）。",
+  "evidence": [
+   {
+    "docName": "hikari-cp-reference.xlsx",
+    "titlePath": "hikari-cp-reference.xlsx > 参数说明 > 数据行 1-8",
+    "chunkId": "e092a79f-9401-49e7-b3d0-773ebe74e679-c0001",
+    "contentHash": "3bb44a355873724b",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "HikariCP 出现 Communications link failure 的常见原因和处置方法？",
+  "answerable": true,
+  "category": "DIRECT",
+  "referenceAnswer": "连接存活超过服务端 wait_timeout；将 maxLifetime 设为小于 MySQL wait_timeout 的值。",
+  "evidence": [
+   {
+    "docName": "hikari-cp-reference.xlsx",
+    "titlePath": "hikari-cp-reference.xlsx > 常见问题 > 数据行 1-4",
+    "chunkId": "e092a79f-9401-49e7-b3d0-773ebe74e679-c0003",
+    "contentHash": "f206425b30d4df32",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "Kafka 生产端报 MESSAGE_TOO_LARGE 该怎么处理？",
+  "answerable": true,
+  "category": "DIRECT",
+  "referenceAnswer": "消息超过 max.message.bytes；调大 topic 的 max.message.bytes 或拆分消息。",
+  "evidence": [
+   {
+    "docName": "kafka-error-codes.csv",
+    "titlePath": "kafka-error-codes.csv > 数据行 1-5",
+    "chunkId": "8fca79d2-2e0f-4471-a9c4-7d91b77528c1-c0001",
+    "contentHash": "00a20f1137e70e82",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "Kafka 报 COORDINATOR_NOT_AVAILABLE 是什么含义？",
+  "answerable": true,
+  "category": "DIRECT",
+  "referenceAnswer": "组协调器暂不可用（__consumer_offsets 迁移、broker 负载高）；自动重试，持续出现则检查 broker 健康。",
+  "evidence": [
+   {
+    "docName": "kafka-error-codes.csv",
+    "titlePath": "kafka-error-codes.csv > 数据行 6-6",
+    "chunkId": "8fca79d2-2e0f-4471-a9c4-7d91b77528c1-c0002",
+    "contentHash": "5d36397cbffedda9",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "响应体超过 nginx 的 proxy_buffers 总容量时会怎样？",
+  "answerable": true,
+  "category": "DIRECT",
+  "referenceAnswer": "超出部分写入临时文件（proxy_max_temp_file_size 默认 1024m）；设为 0 禁用临时文件，超出部分同步转发并阻塞读取后端。",
+  "evidence": [
+   {
+    "docName": "nginx-proxy-guide.docx",
+    "titlePath": "nginx-proxy-guide.docx > 1.1.1. 缓冲区大小溢出行为",
+    "chunkId": "31ec47ff-583f-4070-8c0e-1d0c5a66e32c-c0002",
+    "contentHash": "932efeadd83e247d",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "HikariCP 高吞吐 OLTP 场景的池大小建议是多少？为什么？",
+  "answerable": true,
+  "category": "DIRECT",
+  "referenceAnswer": "40；超过 40 后加大池收益递减，优先优化慢 SQL。",
+  "evidence": [
+   {
+    "docName": "hikari-cp-reference.xlsx",
+    "titlePath": "hikari-cp-reference.xlsx > 容量估算 > 数据行 1-3",
+    "chunkId": "e092a79f-9401-49e7-b3d0-773ebe74e679-c0005",
+    "contentHash": "26f96f5fd2251680",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "RDB 快照的 save 60 1000 配置是什么意思？",
+  "answerable": true,
+  "category": "DIRECT",
+  "referenceAnswer": "60 秒内至少 1000 个键被修改则自动触发快照落盘。",
+  "evidence": [
+   {
+    "docName": "redis-persistence.md",
+    "titlePath": "redis-persistence.md > 1.4. RDB 快照机制",
+    "chunkId": "7f701112-3dbc-405b-95b9-c2eabd95d55b-c0006",
+    "contentHash": "ced63f37a2183791",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "Redis 那个把数据集写成单个紧凑文件的持久化方式，有什么好处和坏处？",
+  "answerable": true,
+  "category": "TERM_VARIATION",
+  "referenceAnswer": "即 RDB：优点是文件紧凑适合备份、父进程不阻塞、大库重启快；缺点是宕机会丢最近几分钟数据、fork 耗时。",
+  "evidence": [
+   {
+    "docName": "redis-persistence.md",
+    "titlePath": "redis-persistence.md > 1.2. RDB 的优缺点",
+    "chunkId": "7f701112-3dbc-405b-95b9-c2eabd95d55b-c0003",
+    "contentHash": "b6e4faa64efabffe",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "ES 里「黄着」但没「红着」的集群，数据有风险吗？",
+  "answerable": true,
+  "category": "TERM_VARIATION",
+  "referenceAnswer": "yellow=主分片齐全但副本未分配；节点故障时部分数据在修复前可能不可用（比 red 轻）。",
+  "evidence": [
+   {
+    "docName": "elasticsearch-cluster-health.md",
+    "titlePath": "elasticsearch-cluster-health.md > 1.1. 集群健康状态",
+    "chunkId": "91cd8c45-ad97-4a18-879f-adb4f17b107a-c0002",
+    "contentHash": "1882d9bb82b64858",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "Kafka 里消费者「欠」了多少条消息没消费，这个指标叫什么、怎么算？",
+  "answerable": true,
+  "category": "TERM_VARIATION",
+  "referenceAnswer": "叫 Consumer Lag（滞后量）= LEO − 已消费位移。",
+  "evidence": [
+   {
+    "docName": "kafka-consumer-groups.md",
+    "titlePath": "kafka-consumer-groups.md > 1.3. 消费位移与 Lag",
+    "chunkId": "ea86ba36-b94a-4fbd-b0df-22ec9cf9193e-c0004",
+    "contentHash": "f62ed3c0c8fa027e",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "nginx 把后端响应先攒着再发给客户端的这个行为，由哪个配置控制？怎么关掉？",
+  "answerable": true,
+  "category": "TERM_VARIATION",
+  "referenceAnswer": "proxy_buffering，默认 on；设为 off 即关闭（同步透传）。",
+  "evidence": [
+   {
+    "docName": "nginx-proxy-buffering.md",
+    "titlePath": "nginx-proxy-buffering.md > 1.1. proxy_buffering 的行为",
+    "chunkId": "d2bbbd13-bc71-4ca8-b602-ec2d93bcb3b8-c0002",
+    "contentHash": "5c734c885adef07b",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "数据库连接池里那个「连接最长能活多久」的参数，默认多少？",
+  "answerable": true,
+  "category": "TERM_VARIATION",
+  "referenceAnswer": "maxLifetime，默认 1800000 ms（30 分钟）。",
+  "evidence": [
+   {
+    "docName": "hikari-cp-reference.xlsx",
+    "titlePath": "hikari-cp-reference.xlsx > 参数说明 > 数据行 1-8",
+    "chunkId": "e092a79f-9401-49e7-b3d0-773ebe74e679-c0001",
+    "contentHash": "3bb44a355873724b",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "Kafka 消费组里「一个成员掉线了会怎样」？",
+  "answerable": true,
+  "category": "TERM_VARIATION",
+  "referenceAnswer": "触发再平衡（Rebalance），组内消费者停止消费直到分区重新分配完成。",
+  "evidence": [
+   {
+    "docName": "kafka-consumer-groups.md",
+    "titlePath": "kafka-consumer-groups.md > 1.2. 再平衡（Rebalance）",
+    "chunkId": "ea86ba36-b94a-4fbd-b0df-22ec9cf9193e-c0003",
+    "contentHash": "0ea264219a11518c",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "连接池报「connection is not available，请求超时」一般是什么问题？",
+  "answerable": true,
+  "category": "TERM_VARIATION",
+  "referenceAnswer": "池耗尽（连接泄漏或并发超上限）；排查未关闭的连接，必要时调大 maximumPoolSize。",
+  "evidence": [
+   {
+    "docName": "hikari-cp-reference.xlsx",
+    "titlePath": "hikari-cp-reference.xlsx > 常见问题 > 数据行 1-4",
+    "chunkId": "e092a79f-9401-49e7-b3d0-773ebe74e679-c0003",
+    "contentHash": "f206425b30d4df32",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "Kafka 消费者请求的位移超出了分区已有的位移范围，报的是什么错、怎么办？",
+  "answerable": true,
+  "category": "TERM_VARIATION",
+  "referenceAnswer": "OFFSET_OUT_OF_RANGE；按 auto.offset.reset 策略重置位移（earliest/latest）。",
+  "evidence": [
+   {
+    "docName": "kafka-error-codes.csv",
+    "titlePath": "kafka-error-codes.csv > 数据行 1-5",
+    "chunkId": "8fca79d2-2e0f-4471-a9c4-7d91b77528c1-c0001",
+    "contentHash": "00a20f1137e70e82",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "Word 语料里写的 proxy_buffer_size 是干嘛用的、默认多大？",
+  "answerable": true,
+  "category": "TERM_VARIATION",
+  "referenceAnswer": "响应头缓冲区（与系统内存页一致），默认 4k|8k。",
+  "evidence": [
+   {
+    "docName": "nginx-proxy-guide.docx",
+    "titlePath": "nginx-proxy-guide.docx > 1.3. 常用参数速查表",
+    "chunkId": "31ec47ff-583f-4070-8c0e-1d0c5a66e32c-c0004",
+    "contentHash": "61140b76b88c087a",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "Redis Cluster 的 slot 迁移失败应该怎么排查解决？",
+  "answerable": false,
+  "category": "CONFUSABLE",
+  "referenceAnswer": "语料只讲 Redis 单机持久化（RDB/AOF），完全没有 Cluster/槽位迁移内容。",
+  "evidence": []
+ },
+ {
+  "question": "Redis 的 Keyspace 通知（keyspace notifications）怎么开启？",
+  "answerable": false,
+  "category": "CONFUSABLE",
+  "referenceAnswer": "语料是 Redis 持久化文档，不含 keyspace 通知配置。",
+  "evidence": []
+ },
+ {
+  "question": "Tomcat JDBC 连接池的 maxAge 参数默认是多少？",
+  "answerable": false,
+  "category": "CONFUSABLE",
+  "referenceAnswer": "语料只有 HikariCP 参数表（maxLifetime 等），没有 Tomcat JDBC Pool 的 maxAge。",
+  "evidence": []
+ },
+ {
+  "question": "Vibur DBPC 连接池的 maxIdleTime 默认值是多少？",
+  "answerable": false,
+  "category": "CONFUSABLE",
+  "referenceAnswer": "语料只有 HikariCP；Vibur 是另一个连接池产品，语料未涉及。",
+  "evidence": []
+ },
+ {
+  "question": "Kafka MirrorMaker 2 的 offset 同步间隔怎么配置？",
+  "answerable": false,
+  "category": "CONFUSABLE",
+  "referenceAnswer": "语料覆盖消费者组/位移/Lag/积压，没有 MirrorMaker 跨集群复制内容。",
+  "evidence": []
+ },
+ {
+  "question": "Kafka 的 transactions（幂等生产者与事务）怎么使用？",
+  "answerable": false,
+  "category": "CONFUSABLE",
+  "referenceAnswer": "语料没有事务/幂等生产者内容；消息错误码表也不含事务相关项。",
+  "evidence": []
+ },
+ {
+  "question": "nginx 的 proxy_cache_path 应该怎么配置来开启响应缓存？",
+  "answerable": false,
+  "category": "CONFUSABLE",
+  "referenceAnswer": "语料只讲代理缓冲（buffering）与超时，没有 proxy_cache 缓存模块内容。",
+  "evidence": []
+ },
+ {
+  "question": "nginx 的 grpc_pass 怎么配置 gRPC 反向代理？",
+  "answerable": false,
+  "category": "CONFUSABLE",
+  "referenceAnswer": "语料是 ngx_http_proxy_module 的缓冲与超时参数，没有 gRPC 代理内容。",
+  "evidence": []
+ },
+ {
+  "question": "Elasticsearch 的 ILM 索引生命周期策略怎么配置 rollover？",
+  "answerable": false,
+  "category": "CONFUSABLE",
+  "referenceAnswer": "语料讲集群健康与磁盘水位，没有索引生命周期管理内容。",
+  "evidence": []
+ },
+ {
+  "question": "ES 的 shard allocation awareness（机架感知）怎么配置？",
+  "answerable": false,
+  "category": "CONFUSABLE",
+  "referenceAnswer": "语料只有磁盘水位相关的分配设置，没有 allocation awareness 内容。",
+  "evidence": []
+ },
+ {
+  "question": "AOF 的 appendfsync always 模式下，Redis 每秒最多能扛多少写入 QPS？",
+  "answerable": false,
+  "category": "CONFUSABLE",
+  "referenceAnswer": "语料定性说明 always「非常慢」，但没有任何 QPS/吞吐数值，无法回答。",
+  "evidence": []
+ },
+ {
+  "question": "HikariCP 的 connectionTimeout 在高并发下应该调成多少毫秒比较合适？",
+  "answerable": false,
+  "category": "CONFUSABLE",
+  "referenceAnswer": "语料给出默认 30000 ms，但没有给出任何调优建议值或高并发场景的调整指引。",
+  "evidence": []
+ },
+ {
+  "question": "HikariCP 的 idleTimeout 和 maxLifetime 有什么区别？",
+  "answerable": true,
+  "category": "CONFUSABLE",
+  "referenceAnswer": "idleTimeout=600000 ms（空闲连接存活），maxLifetime=1800000 ms（连接最长存活），语义不同。",
+  "evidence": [
+   {
+    "docName": "hikari-cp-reference.xlsx",
+    "titlePath": "hikari-cp-reference.xlsx > 参数说明 > 数据行 1-8",
+    "chunkId": "e092a79f-9401-49e7-b3d0-773ebe74e679-c0001",
+    "contentHash": "3bb44a355873724b",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "ES 的低水位 85% 和高水位 90% 触发后的行为有什么不同？",
+  "answerable": true,
+  "category": "CONFUSABLE",
+  "referenceAnswer": "低水位=不再向该节点分配新分片；高水位=开始把分片迁移到磁盘使用率较低的节点。",
+  "evidence": [
+   {
+    "docName": "elasticsearch-cluster-health.md",
+    "titlePath": "elasticsearch-cluster-health.md > 1.2. 磁盘水位三阶段",
+    "chunkId": "91cd8c45-ad97-4a18-879f-adb4f17b107a-c0003",
+    "contentHash": "a14f7aabd0600de7",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "RDB 和 AOF 的「重写/快照」后台过程互相有什么约束？",
+  "answerable": true,
+  "category": "CONFUSABLE",
+  "referenceAnswer": "Redis 2.4 起避免两个后台重磁盘 IO 过程同时进行（快照中不触发 AOF 重写、反之亦然）。",
+  "evidence": [
+   {
+    "docName": "redis-persistence.md",
+    "titlePath": "redis-persistence.md > 1.6. RDB 与 AOF 的相互作用",
+    "chunkId": "7f701112-3dbc-405b-95b9-c2eabd95d55b-c0008",
+    "contentHash": "978e1b60c2572f25",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "nginx 的 proxy_buffer_size 和 proxy_buffers 两个指令有什么区别？",
+  "answerable": true,
+  "category": "CONFUSABLE",
+  "referenceAnswer": "proxy_buffer_size=读取响应第一部分（响应头）的缓冲区；proxy_buffers=读取响应体的缓冲区数量和大小。",
+  "evidence": [
+   {
+    "docName": "nginx-proxy-buffering.md",
+    "titlePath": "nginx-proxy-buffering.md > 1.2. 相关指令",
+    "chunkId": "d2bbbd13-bc71-4ca8-b602-ec2d93bcb3b8-c0003",
+    "contentHash": "4000ad86e7134462",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "Kafka 报 UNKNOWN_TOPIC_OR_PARTITION 和 NOT_LEADER_FOR_PARTITION 的处置有什么不同？",
+  "answerable": true,
+  "category": "CONFUSABLE",
+  "referenceAnswer": "前者核对 topic 名/创建 topic 或开启自动创建；后者客户端自动刷新元数据后重试，无需人工干预。",
+  "evidence": [
+   {
+    "docName": "kafka-error-codes.csv",
+    "titlePath": "kafka-error-codes.csv > 数据行 1-5",
+    "chunkId": "8fca79d2-2e0f-4471-a9c4-7d91b77528c1-c0001",
+    "contentHash": "00a20f1137e70e82",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "proxy_read_timeout 和 proxy_connect_timeout 分别管什么？",
+  "answerable": true,
+  "category": "CONFUSABLE",
+  "referenceAnswer": "connect=建立连接的超时；read=两次成功读操作之间的最大间隔（超时关闭连接）；默认都是 60s。",
+  "evidence": [
+   {
+    "docName": "nginx-proxy-guide.docx",
+    "titlePath": "nginx-proxy-guide.docx > 1.2. 关键超时参数",
+    "chunkId": "31ec47ff-583f-4070-8c0e-1d0c5a66e32c-c0003",
+    "contentHash": "0ed541d440505063",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "怎么用 Git rebase 整理提交历史？",
+  "answerable": false,
+  "category": "OUT_OF_KB",
+  "evidence": []
+ },
+ {
+  "question": "MySQL 的主从复制延迟怎么解决？",
+  "answerable": false,
+  "category": "OUT_OF_KB",
+  "evidence": []
+ },
+ {
+  "question": "Kubernetes 里 Pod 一直 CrashLoopBackOff 怎么排查？",
+  "answerable": false,
+  "category": "OUT_OF_KB",
+  "evidence": []
+ },
+ {
+  "question": "Python 的 GIL 对多线程程序有什么影响？",
+  "answerable": false,
+  "category": "OUT_OF_KB",
+  "evidence": []
+ },
+ {
+  "question": "TLS 证书过期前怎么自动轮换（cert-manager）？",
+  "answerable": false,
+  "category": "OUT_OF_KB",
+  "evidence": []
+ },
+ {
+  "question": "PostgreSQL 的 VACUUM FULL 和普通 VACUUM 有什么区别？",
+  "answerable": false,
+  "category": "OUT_OF_KB",
+  "evidence": []
+ },
+ {
+  "question": "React 组件的 useEffect 依赖数组应该怎么写？",
+  "answerable": false,
+  "category": "OUT_OF_KB",
+  "evidence": []
+ },
+ {
+  "question": "Linux 的 net.ipv4.tcp_tw_reuse 内核参数是什么含义？",
+  "answerable": false,
+  "category": "OUT_OF_KB",
+  "evidence": []
+ },
+ {
+  "question": "Redis 主从复制（replication）的主从延迟怎么监控和解决？",
+  "answerable": false,
+  "category": "OUT_OF_KB",
+  "referenceAnswer": "语料是 Redis 持久化主题，无主从复制内容——同产品不同主题。",
+  "evidence": []
+ },
+ {
+  "question": "Kafka 消费者组的热点分区（skewed partition）该怎么均衡？",
+  "answerable": false,
+  "category": "OUT_OF_KB",
+  "referenceAnswer": "语料讲 Lag 与积压处理，没有分区倾斜/均衡内容——同领域不同问题。",
+  "evidence": []
+ },
+ {
+  "question": "ES 集群 rolling restart（滚动重启）的标准步骤是什么？",
+  "answerable": false,
+  "category": "OUT_OF_KB",
+  "referenceAnswer": "语料有集群健康/水位/分片排查，但没有滚动重启流程——同产品不同运维任务。",
+  "evidence": []
+ },
+ {
+  "question": "HikariCP 的 keepaliveTime 和 idleTimeout 的关系是什么？",
+  "answerable": false,
+  "category": "OUT_OF_KB",
+  "referenceAnswer": "语料 FAQ 提到「开启 keepaliveTime 或调小 idleTimeout」这一处置，但 keepaliveTime 本身的默认值、工作机制与 idleTimeout 的交互在语料中没有展开，无法完整回答。",
+  "evidence": []
+ },
+ {
+  "question": "nginx 的 worker_processes 和 worker_connections 应该怎么设置？",
+  "answerable": false,
+  "category": "OUT_OF_KB",
+  "referenceAnswer": "语料只覆盖反向代理模块参数，没有 events/进程模型配置——同产品不同模块。",
+  "evidence": []
+ },
+ {
+  "question": "ES 的 wait_for_status 参数有哪些取值？同步和异步调用有什么区别？",
+  "answerable": false,
+  "category": "OUT_OF_KB",
+  "referenceAnswer": "语料提到 wait_for_status=green/yellow/red+timeout 的用法，但没有\"同步/异步调用区别\"的内容，问题的第二半无法回答。",
+  "evidence": []
+ },
+ {
+  "question": "RDB 和 AOF 各自的优缺点是什么？无持久化模式相比两者又有什么优势？",
+  "answerable": false,
+  "category": "PARTIAL_EVIDENCE",
+  "referenceAnswer": "语料有 RDB、AOF 优缺点，也有\"无持久化：纯缓存场景使用\"一句，但未展开无持久化的优势分析，问题要求的第三部分证据不完整。",
+  "evidence": []
+ },
+ {
+  "question": "Kafka 积压的四种常见原因是什么？每种原因分别怎么处理？",
+  "answerable": false,
+  "category": "PARTIAL_EVIDENCE",
+  "referenceAnswer": "语料列出 4 个常见原因，但处理手段按优先级给了 4 条整体措施，并未与原因一一对应，无法按\"每种原因分别怎么处理\"完整回答。",
+  "evidence": []
+ },
+ {
+  "question": "HikariCP 的 maximumPoolSize、minimumIdle、connectionTimeout 的默认值和最小值分别是多少？",
+  "answerable": false,
+  "category": "PARTIAL_EVIDENCE",
+  "referenceAnswer": "语料只有默认值（10/同 maximumPoolSize/30000 ms），没有任何最小值信息。",
+  "evidence": []
+ },
+ {
+  "question": "nginx 代理的三种超时（connect/read/send）各自超出后会发生什么？",
+  "answerable": false,
+  "category": "PARTIAL_EVIDENCE",
+  "referenceAnswer": "语料明确说明 read 超时「则关闭连接」，但 connect/send 超时后的具体行为没有说明，只能部分回答。",
+  "evidence": []
+ },
+ {
+  "question": "Kafka 错误码表里消费端、集群、生产端三类错误各自的处置建议分别有哪些？",
+  "answerable": false,
+  "category": "PARTIAL_EVIDENCE",
+  "referenceAnswer": "语料覆盖消费端与集群类错误码，但\"生产端\"只有 MESSAGE_TOO_LARGE 一条且 Row-group 分块（1-5 行 + 第 6 行分开），需要跨块聚合；且\"三类各自的建议\"要求完整枚举，证据不足。",
+  "evidence": []
+ },
+ {
+  "question": "HikariCP 在低频后台任务、常规 Web、高吞吐 OLTP 三种场景下分别建议连接数是多少？其中低频场景的并发数依据是什么？",
+  "answerable": false,
+  "category": "PARTIAL_EVIDENCE",
+  "referenceAnswer": "语料有三种场景的建议池大小，但低频场景\"并发数 10\"与\"核心数×2\"的说明并未解释依据细节，问题最后半部分无法回答。",
+  "evidence": []
+ },
+ {
+  "question": "Redis 三种 fsync 策略各自的性能表现和丢数据风险分别是什么？什么场景该选 no？",
+  "answerable": false,
+  "category": "PARTIAL_EVIDENCE",
+  "referenceAnswer": "语料给出三种策略的速度/安全性定性描述，但没有\"该选 no 的场景\"的指引内容。",
+  "evidence": []
+ },
+ {
+  "question": "ES 磁盘超限处理的三个步骤分别解决什么问题？其中调整水位设置的风险是什么？",
+  "answerable": false,
+  "category": "PARTIAL_EVIDENCE",
+  "referenceAnswer": "语料有完整三步操作，但\"调整水位的风险\"没有任何论述，只能部分回答。",
+  "evidence": []
+ },
+ {
+  "question": "nginx 开启和关闭缓冲分别适合什么场景？proxy_busy_buffers_size 的默认值怎么计算？",
+  "answerable": false,
+  "category": "PARTIAL_EVIDENCE",
+  "referenceAnswer": "语料说明两种模式的适用场景，busy_buffers 默认值说\"默认为 proxy_buffers 中两块的大小\"——可算出，但\"怎么计算\"的规则细节（向上取整/对齐）语料没有；严格看最后一问证据不足。",
+  "evidence": []
+ },
+ {
+  "question": "RDB 的 fork 消耗和 AOF 的 everysec 刷盘，两者在性能上的量化对比数据是什么？",
+  "answerable": false,
+  "category": "PARTIAL_EVIDENCE",
+  "referenceAnswer": "语料只有定性描述（fork 毫秒级~一秒、everysec 基本与快照同速），没有任何量化对比数据。",
+  "evidence": []
+ },
+ {
+  "question": "Kafka 消费者组扩容后分区分配不均，应该怎么调整？assignment strategy 可以配置哪些？",
+  "answerable": false,
+  "category": "PARTIAL_EVIDENCE",
+  "referenceAnswer": "语料说\"消费者数与分区数最好成整除关系\"，但分配策略（range/round robin/sticky 等）完全没有。",
+  "evidence": []
+ },
+ {
+  "question": "ES 未分配分片的排查工具有哪些？每种工具的输出字段分别是什么含义？",
+  "answerable": false,
+  "category": "PARTIAL_EVIDENCE",
+  "referenceAnswer": "语料列出 _cat/shards 与 _cluster/allocation/explain 及部分字段名，但\"每种输出字段含义\"没有逐项解释，问题要求超出证据范围。",
+  "evidence": []
+ },
+ {
+  "question": "磁盘清理完了之后，ES 索引上的只读块要怎么解除？",
+  "answerable": true,
+  "category": "FOLLOW_UP",
+  "referenceAnswer": "磁盘恢复后只读块不会自动解除，须手动 PUT /<索引名>/_settings {index.blocks.read_only_allow_delete: null}。",
+  "evidence": [
+   {
+    "docName": "elasticsearch-cluster-health.md",
+    "titlePath": "elasticsearch-cluster-health.md > 1.3. 磁盘超限的处理步骤",
+    "chunkId": "91cd8c45-ad97-4a18-879f-adb4f17b107a-c0004",
+    "contentHash": "fce6668867ccef82",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "那对因此分配失败的分片，还要做什么？",
+  "answerable": true,
+  "category": "FOLLOW_UP",
+  "referenceAnswer": "POST _cluster/reroute?retry_failed=true 重试分配。",
+  "evidence": [
+   {
+    "docName": "elasticsearch-cluster-health.md",
+    "titlePath": "elasticsearch-cluster-health.md > 1.3. 磁盘超限的处理步骤",
+    "chunkId": "91cd8c45-ad97-4a18-879f-adb4f17b107a-c0004",
+    "contentHash": "fce6668867ccef82",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "以后想避免再触发洪泛水位，应该调哪些配置？",
+  "answerable": true,
+  "category": "FOLLOW_UP",
+  "referenceAnswer": "调高 cluster.routing.allocation.disk.watermark.low/high/flood_stage 三档水位（或绝对值）。",
+  "evidence": [
+   {
+    "docName": "elasticsearch-cluster-health.md",
+    "titlePath": "elasticsearch-cluster-health.md > 1.2. 磁盘水位三阶段",
+    "chunkId": "91cd8c45-ad97-4a18-879f-adb4f17b107a-c0003",
+    "contentHash": "a14f7aabd0600de7",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "RDB 快照太频繁导致 fork 卡顿，怎么缓解？",
+  "answerable": true,
+  "category": "FOLLOW_UP",
+  "referenceAnswer": "调低快照频率（save N M 的 N/M），fork 耗时与数据集大小相关，大数据集 fork 会停服务数毫秒~一秒。",
+  "evidence": [
+   {
+    "docName": "redis-persistence.md",
+    "titlePath": "redis-persistence.md > 1.4. RDB 快照机制",
+    "chunkId": "7f701112-3dbc-405b-95b9-c2eabd95d55b-c0006",
+    "contentHash": "ced63f37a2183791",
+    "page": null
+   },
+   {
+    "docName": "redis-persistence.md",
+    "titlePath": "redis-persistence.md > 1.2. RDB 的优缺点",
+    "chunkId": "7f701112-3dbc-405b-95b9-c2eabd95d55b-c0003",
+    "contentHash": "b6e4faa64efabffe",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "线上出现积压告警，第一步应该看什么命令？",
+  "answerable": true,
+  "category": "FOLLOW_UP",
+  "referenceAnswer": "kafka-consumer-groups.sh --describe --group <group> 查分区级 Lag。",
+  "evidence": [
+   {
+    "docName": "kafka-consumer-groups.md",
+    "titlePath": "kafka-consumer-groups.md > 1.4. 积压的监控",
+    "chunkId": "ea86ba36-b94a-4fbd-b0df-22ec9cf9193e-c0005",
+    "contentHash": "341a64db3112f9d5",
+    "page": null
+   }
+  ]
+ },
+ {
+  "question": "如果积压实在处理不过来，可以把消费者位移重置到最新跳过去吗？",
+  "answerable": true,
+  "category": "FOLLOW_UP",
+  "referenceAnswer": "不要——重置位移会丢数据；应扩容消费者/加分区/优化消费逻辑，极端情况旁路暂存补偿。",
+  "evidence": [
+   {
+    "docName": "kafka-consumer-groups.md",
+    "titlePath": "kafka-consumer-groups.md > 1.5. 积压的常见原因与处理",
+    "chunkId": "ea86ba36-b94a-4fbd-b0df-22ec9cf9193e-c0006",
+    "contentHash": "8f2c77c4fe83debb",
+    "page": null
+   }
+  ]
+ }
+]

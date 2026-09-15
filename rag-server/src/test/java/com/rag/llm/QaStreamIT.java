@@ -117,6 +117,9 @@ class QaStreamIT {
         // R2-A1 之后，与语料无关的问题会走拒答短路（不调用模型），从而掩盖传输路径的
         // 真实行为；故此处显式关闭拒答，拒答策略由 RefusalPolicyTest 专门覆盖。
         registry.add("rag.retrieval.refusal.enabled", () -> "false");
+        // R4：Answerability 判定同样会短路（NO_HITS/低分直接拒答），本套件一并关闭，
+        // 判定策略由 AnswerabilityPolicyTest 覆盖。
+        registry.add("rag.retrieval.answerability.enabled", () -> "false");
         // 固定 VECTOR 模式：本套件用 8 维假向量，只关心传输语义，不涉及融合/重排
         registry.add("rag.retrieval.mode", () -> "VECTOR");
     }

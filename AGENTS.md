@@ -50,7 +50,7 @@ Invoke the workspace skills explicitly (Skill tool, by skill name) when you want
 - `$supie-edit` — scoped feature change; supports `fast|standard|strict`.
 - `$supie-fix` — root-cause bug fix; supports `fast|standard|strict`.
 
-## Project state (updated after R4-Excel, 2026-09-15)
+## Project state (updated after R4-Answerability, 2026-09-15)
 
 **Current status**: rounds 1–2 complete; round 3 P1/P2/P3 complete (format expansion; MinerU
 OCR with explicit `PARSER_UNAVAILABLE`, no silent fallback; document versioning with Flyway V3
@@ -60,13 +60,34 @@ strategy chunk via `SpreadsheetChunker` — per-sheet Summary chunk (fields/rowc
 overlong rows stay atomic), row ranges carried in titlePath (`... > 数据行 a-b`) so
 citations/debug/eval get row-level locating with zero schema/contract changes; retrieval
 routing (RRF + rerank) unchanged.
+R4-Answerability done and **A/B-verified** (72-item dedicated TUNING set): refusal is no longer a
+single `topScore < threshold` scalar. `AnswerabilityPolicy` (shared by Chat/Debug/Eval — the
+single-code-path principle now covers judging) gates: `LOW_SCORE_REFUSAL` below the R2-calibrated
+dual thresholds (rerank 0.65 / cosine 0.30), everything else goes to `EvidenceSufficiencyJudge`
+(structured output, temperature=0, Future-based timeout; six rules pinning "partial evidence /
+same-product different-param / needs outside knowledge ⇒ false"). Judge failure degrades to the
+old threshold behavior with explicit `JUDGE_DEGRADED` (fail-closed=true switches to conservative
+refusal). **No highThreshold fast-accept exists** — baseline data proved PARTIAL_EVIDENCE and
+answerable score distributions fully overlap (both reach 1.000). Result: False Answer Rate
+47.4% → 10.5% with FRR 0% → 5.9%, retrieval metrics unchanged. Eval now records per-item
+`refused` + decision columns (Flyway V4) and reports an answerability confusion matrix
+(TP/FP/FN/TN, falseAnswerRate = FP/(FP+TN), falseRefusalRate = FN/(FN+TP), judge invocation/
+degradation rate). SSE adds an `ANSWERABILITY_CHECKED` stage event (clients must tolerate
+unknown stage values). EvalCategory gains `PARTIAL_EVIDENCE`.
 The system is a locally runnable, measurably effective RAG:
 ingestion (pdf/md/txt/**docx/xlsx/csv**; xlsx/csv+STRUCTURE → spreadsheet-aware chunking;
 PDF parser selectable `pdfbox|mineru` via `rag.ingestion.pdf-parser`) →
 hybrid retrieval (BM25 + vector RRF fusion + DashScope rerank with explicit degradation)
-→ SSE streaming answers (refusal ⇒ empty citations) → retrieval debug (per-stage ranks)
-→ evaluation (chunk-level judging incl. **contentHash anchor** + two-run comparison with comparability guard).
+→ **answerability gate (low-score refusal → LLM evidence-sufficiency judge, shared single path)**
+→ SSE streaming answers (refusal ⇒ empty citations) → retrieval debug (per-stage ranks +
+answerability decision) → evaluation (chunk-level judging incl. **contentHash anchor** +
+answerability confusion matrix + two-run comparison with comparability guard).
 
+- Round-4 records: `docs/round4/01-Baseline分析.md` (baseline score distributions + Bad Case
+  enumeration + why highThreshold was rejected), `02-实施记录.md` (final architecture, threshold
+  provenance, A/B table, residual FP/FN per item, limitations)
+- Round-4 eval material: `docs/eval/eval-answerability-v1-array.json` (72 items, contentHash
+  anchors; generator `scripts/gen-answerability-dataset.py`); KB `b78b6fb8` (7 docs / 44 chunks)
 - Round-3 records: `docs/round3/01-实施记录-P1.md`, `02-实施记录-P2.md`, `03-实施记录-P3.md`,
   `04-实施记录-R4Excel.md`
 - Scanned-PDF sample for retesting: `docs/eval-corpus/redis-scanned.pdf` (image-only, no text layer)
@@ -76,17 +97,23 @@ hybrid retrieval (BM25 + vector RRF fusion + DashScope rerank with explicit degr
 - Progress & round-3 plan: `docs/round2/03-进度与第三轮计划.md`
 - Round-2 implementation record: `docs/round2/02-实施记录.md`
 - Round-1 handoff: `docs/HANDOFF.md`
-- Test counts cited anywhere: backend 157 (`mvn test`), frontend 30 (vitest). Re-verify before relying on them.
+- Test counts cited anywhere: backend 182 (`mvn test`), frontend 30 (vitest). Re-verify before relying on them.
+
+**Dead config watch**: `rag.retrieval.refusal.insufficient-threshold` / `RAG_REFUSAL_THRESHOLD`
+were dead keys (removed in R4). Refusal thresholds are `rerank-threshold` /
+`cosine-threshold` (+ `rag.answerability.*` for the judge). Do not reintroduce undocumented keys.
 
 **Remaining scope** (direction only; user approval per material step):
-second corpus per new format (only 1 doc each so far), reliability hardening (P4),
-re-evaluating refusal thresholds on larger corpora, structured Excel retrieval
-(row-level ES fields + filter/range queries) driven by real BadCase attribution,
-code-file format support.
+re-audit PARTIAL_EVIDENCE expected labels in answerability-v1 (4 residual FPs were partly
+over-strict dataset expectations), second corpus per new format, reliability hardening (P4),
+structured Excel retrieval (row-level ES fields + filter/range queries) driven by real
+BadCase attribution, code-file format support. Query Rewrite / Parent-Child / Metadata Filter /
+GraphRAG have **no Bad Case support yet** (Hit@3=1.0; all R4 Bad Cases were in the judging /
+generation layer) — do not add them without new evidence.
 
 ## Lessons learned (bind future rounds)
 
-These were paid for in rounds 1–2. Treat them as constraints, not suggestions:
+These were paid for in rounds 1–4. Treat them as constraints, not suggestions:
 
 1. **Fix the metric before optimizing.** Round 1's Hit@K=1.00 was a degenerate document-level score;
    half of round 2 was spent making evaluation honest. Any round claiming "improvement" must first
@@ -114,6 +141,20 @@ These were paid for in rounds 1–2. Treat them as constraints, not suggestions:
 8. **Round-1 dataset format (docName anchoring) is retired.** Evaluation uses v2 datasets with real
    chunkId/titlePath anchors (`docs/eval/*-v2-array.json`). Chunk-level judging does not fall back to
    docName equality; unanchored evidence scores as a miss, by design.
+9. **Run the baseline before building the mechanism (R4).** The low/high/gray-zone gate was the
+   pre-approved candidate design; the 72-item baseline proved unanswerable questions reach
+   rerank=1.000 (fully overlapping answerable scores), so the high-threshold fast-accept was
+   dropped before any code was written. Sequence: dataset → old-policy baseline → distribution
+   analysis → gate design → implement → A/B. Never implement a gate whose thresholds lack data
+   provenance.
+10. **Relevant ≠ Answerable, and the judge is not oracular.** Rerank scores measure semantic
+    similarity; multi-part questions ("each of the three, and why") can score 1.000 while the
+    evidence covers only part. The LLM judge cuts false answers ~78% but still misjudges with
+    conf≥0.95 — after every A/B, re-audit the dataset's expected labels before tuning the system.
+11. **Persist the decision, not just the outcome.** Refusal used to be inferred from the answer
+    text (fragile). Since V4, `eval_run_item` stores `refused` + decision type/confidence/reason/
+    degraded/latency so FP/FN can be reproduced and attributed (recall error? ranking? evidence?
+    judge? generation?).
 
 ## Supie Dev stage discipline
 

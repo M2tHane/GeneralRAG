@@ -1,6 +1,6 @@
 # 通用知识问答 RAG
 
-可本地运行、可演示、可评测的知识问答系统：文档入库（解析 → 清洗 → 分块 → 向量化 → 入库）→ **混合检索（BM25 + 向量 RRF 融合 + 重排）** → SSE 流式回答与来源引用 → 检索调试（分阶段位次）→ 效果评测（分块级指标 + 两次运行对比）。
+可本地运行、可演示、可评测的知识问答系统：文档入库（解析 → 清洗 → 分块 → 向量化 → 入库）→ **混合检索（BM25 + 向量 RRF 融合 + 重排）** → **证据充分性判定（低分直拒 + LLM Evidence Judge，两阶段门控）** → SSE 流式回答与来源引用 → 检索调试（分阶段位次 + Answerability 决策）→ 效果评测（分块级指标 + Answerability 混淆矩阵 + 两次运行对比）。
 
 - 需求基线：`docs/01-需求理解.md`（第一版）、`docs/round2/01-需求理解.md`（第二轮）
 - 技术路线：`docs/03-技术路线.md`
@@ -8,6 +8,8 @@
 - 已批准 UX 决策：`prototype/DESIGN.md`（原型代码在 `prototype/`，为模拟数据演示）
 - 第一版实现计划与验证报告：`docs/06-实现计划.md`、`docs/06-测试报告.html`
 - 第二轮实施记录：`docs/round2/02-实施记录.md`
+- 第三轮（格式扩展/Excel 分块/文档多版本）：`docs/round3/01-实施记录-P1.md` ~ `04-实施记录-R4Excel.md`
+- 第四轮（Answerability）：`docs/round4/01-Baseline分析.md`、`docs/round4/02-实施记录.md`
 
 ## 环境要求
 
@@ -50,7 +52,11 @@ export RERANK_MODEL_NAME=qwen3.7-text-rerank
 
 # 检索模式与拒答阈值（可选覆盖）
 export RAG_RETRIEVAL_MODE=HYBRID_RERANK   # VECTOR | HYBRID | HYBRID_RERANK
-export RAG_REFUSAL_THRESHOLD=0.65         # 重排口径的决定性阈值；切模式需重校准
+export RAG_REFUSAL_RERANK_THRESHOLD=0.65  # 重排口径阈值（默认 0.65）；切模式需重校准
+export RAG_REFUSAL_COSINE_THRESHOLD=0.30  # 余弦口径阈值（默认 0.30，重排降级时生效）
+# Answerability 证据充分性判定（默认开启；低分直拒，其余交给 LLM Judge）
+export RAG_ANSWERABILITY_ENABLED=true
+export RAG_ANSWERABILITY_FAIL_CLOSED=false # Judge 失败时 false=退回旧阈值放行 / true=保守拒答
 
 mvn spring-boot:run   # http://localhost:8080
 ```
@@ -69,6 +75,21 @@ mvn spring-boot:run   # http://localhost:8080
 
 拒答阈值分两套口径：重排生效时用 `rerank-threshold`（默认 0.65，实测可分：可答题 ≥0.79、资料外 ≤0.63）；降级/未启用重排时用 `cosine-threshold`（默认 0.30，**区分度弱**，实测资料外题余弦分与可答题区间重叠，无法可靠识别资料外问题）。
 
+### 证据充分性判定（Answerability，R4）
+
+相关不等于可回答——关键词高度重合的问题（同产品不同参数、部分证据、同技术不同功能）会拿到高重排分但证据不含答案。R4 起在检索与生成之间加入 `AnswerabilityPolicy`（问答/调试/评测共享同一路径）：
+
+```text
+score < lowThreshold（双口径阈值，同上）        → 直接拒答（LOW_SCORE_REFUSAL，不调 Judge）
+其余 → LLM Evidence Sufficiency Judge          → 可回答（JUDGE_ACCEPT）/ 证据不足（JUDGE_REFUSE）
+Judge 超时/不可用/解析失败                      → JUDGE_DEGRADED（默认退回旧阈值行为并显式标注）
+```
+
+- Judge 不看"是否相关"，只判断"**仅凭证据能否完整、明确回答**"：部分证据、同产品不同参数、需要外部知识补全 → 判不可回答。
+- **不存在"高分直答"**：实测部分证据题与可答题的重排分分布完全重叠（两类都有 1.000），任何高分阈值都会漏掉假阳性（数据见 `docs/round4/01-Baseline分析.md`）。
+- 实测效果（72 题专项集 A/B）：**False Answer Rate 47.4% → 10.5%**，False Refusal Rate 0% → 5.9%，检索指标零变化；代价是 Judge 调用率 72.2%、平均 +2.6s。
+- 判定关闭：`RAG_ANSWERABILITY_ENABLED=false`（退回旧单阈值行为，仅对照用）；Judge 失败策略 `RAG_ANSWERABILITY_FAIL_CLOSED=true` 切换为保守拒答。
+
 ### 无模型服务时的体验
 
 `RAG_MODELS_STARTUP_CHECK=false` 可启动用于界面/管理链路验证；此时上传会在 EMBEDDING 阶段失败（原因可读、可重试），问答/调试返回 `RETRIEVAL_FAILED`——这是设计内的降级行为，不是缺陷。重排服务不可达时不会导致问答失败，而是显式降级为融合顺序并在调试页/评测运行中标注「已降级、未重排」。
@@ -83,23 +104,32 @@ pnpm build && pnpm start   # http://localhost:3000（/api 由 Next.js rewrites �
 
 ## 4. 评测
 
-1. 建知识库并上传 `docs/eval-corpus/` 下的 4 篇语料（来源与说明见 `docs/eval/README.md`）；
+1. 建知识库并上传 `docs/eval-corpus/` 下的语料（来源与说明见 `docs/eval/README.md`）；
 2. 导入数据集：`POST /api/v1/eval/datasets`（multipart：file / name / datasetType）——
-   - 第一轮格式：`docs/eval/eval-tuning-v1.json`（TUNING）/ `eval-test-v1.json`（TEST），evidence 用 docName 锚定；
-   - 第二轮格式：`docs/eval/eval-tuning-v2-array.json` / `eval-test-v2-array.json`，evidence 用**真实 chunkId + 分块级 titlePath** 锚定（推荐）；
-   - 调优集与独立测试集严格分离，测试集不参与调参。
+   - 第一轮格式：`docs/eval/eval-tuning-v1.json`（TUNING）/ `eval-test-v1.json`（TEST），evidence 用 docName 锚定（**已退役**）；
+   - 第二轮格式：`docs/eval/eval-tuning-v2-array.json` / `eval-test-v2-array.json`，evidence 用**真实 chunkId + 分块级 titlePath** 锚定；
+   - 第四轮 Answerability 专项集：`docs/eval/eval-answerability-v1-array.json`（72 题，contentHash 锚点，CONFUSABLE/PARTIAL_EVIDENCE/OUT_OF_KB 占 2/3）；
+   - 调优集与独立测试集严格分离，测试集不参与调参；
 3. 发起运行：`POST /api/v1/eval/runs`（datasetId / kbId / 可选 topK、minScore）；
-4. 查看结果：`GET /api/v1/eval/runs/{runId}`（Hit@1/3/5、Recall@5、MRR、拒答正确率、耗时拆分与 p50/p95/max、逐题回答与来源），`PATCH .../items/{itemId}` 人工标注；
+4. 查看结果：`GET /api/v1/eval/runs/{runId}`（Hit@1/3/5、Recall@5、MRR、拒答正确率、**Answerability 混淆矩阵（TP/FP/FN/TN、False Answer Rate、False Refusal Rate、Judge 调用率/降级率/耗时）、耗时拆分与 p50/p95/max、逐题回答与来源与判定记录**），`PATCH .../items/{itemId}` 人工标注；
 5. 前端「效果评测」页可浏览运行列表、查看单次运行、**勾选两次运行做对比**（可比性守卫 + 指标变化 + 逐题计数 + 逐题下钻到分阶段位次）。
 
 ## 5. 测试
 
 ```bash
-cd rag-server && mvn test        # 130 个测试，含 Testcontainers 集成测试套件
+cd rag-server && mvn test        # 182 个测试，含 Testcontainers 集成测试套件
 cd rag-web    && pnpm test       # vitest；pnpm e2e 需前后端同时在线
 ```
 
 ## 已知局限
+
+**第四轮（Answerability）新增口径限制**
+
+- **Judge 不是真值**：Evidence Judge 会以 ≥0.95 的置信度误判——A/B 后残留 4 个 FP 中 3 个是数据集预期过严、1 个是口径边界，但置信度本身不可作为正确性信号。每次调整后都要人工复核数据集预期标签。
+- **PARTIAL_EVIDENCE 的"完整回答"边界存在口径争议**："证据给出通用措施是否算覆盖逐项问题"没有客观答案；专项集中此类边界题约占 1/6，扩数据集时需先统一口径。
+- **Judge 与生成共用同一模型**（本地单模型约束），判定与生成可能同源偏差；换独立小模型是后续优化点。
+- **Answerability 使 E2E 延迟上升约 1/3**（Judge 平均 2.57s）；对延迟敏感场景可 `RAG_ANSWERABILITY_ENABLED=false` 回退到旧阈值行为。
+- **PARTIAL_EVIDENCE 类别（R4）**：`EvalCategory` 新增枚举值，需 V4 迁移；旧客户端若硬编码枚举需同步。
 
 **第二轮引入/变更的口径限制（必读）**
 
@@ -124,9 +154,10 @@ cd rag-web    && pnpm test       # vitest；pnpm e2e 需前后端同时在线
 
 | 项 | 路径 |
 | --- | --- |
-| 后端 | `rag-server/`（Maven 单模块，包边界见技术路线 §2） |
+| 后端 | `rag-server/`（Maven 单模块，包边界见技术路线 §2；`com.rag.answerability` 为 R4 新增包） |
 | 前端 | `rag-web/`（Next.js App Router） |
-| 数据库迁移 | `rag-server/src/main/resources/db/migration/V1__init.sql`（11 表）、`V2__round2_retrieval_eval.sql`（耗时拆分两列） |
+| 数据库迁移 | `rag-server/src/main/resources/db/migration/V1__init.sql`（11 表）、`V2__round2_retrieval_eval.sql`（耗时拆分两列）、`V3__document_versions.sql`（文档多版本）、`V4__answerability_eval.sql`（PARTIAL_EVIDENCE + 逐题决策列） |
 | 中间件编排 | `docker-compose.yml` |
-| 评测材料 | `docs/eval-corpus/`、`docs/eval/` |
+| 评测材料 | `docs/eval-corpus/`、`docs/eval/`（answerability-v1 生成器：`scripts/gen-answerability-dataset.py`） |
+| 轮次记录 | `docs/round2/`、`docs/round3/`、`docs/round4/` |
 | 工作流状态 | `.supie/state/current.yaml`（运行态，不入库） |

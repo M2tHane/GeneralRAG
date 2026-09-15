@@ -102,8 +102,18 @@ rag:
     refusal:
       # 证据不足即拒答并清空引用（R2-A1）；关闭仅用于与第一轮行为做对照
       enabled: ${RAG_REFUSAL_ENABLED:true}
-      # 在调优集上校准的启发式阈值（作用于最终排序分）；切换检索模式后需重新校准
-      insufficient-threshold: ${RAG_REFUSAL_THRESHOLD:0.55}
+      # 双口径阈值：重排生效时用 rerank 阈值（默认模式）；降级/未启用重排时用 cosine 阈值
+      # （校准依据见 docs/round2/01-需求理解.md；余弦口径区分度弱，只能过滤明显不相关）
+      rerank-threshold: ${RAG_REFUSAL_RERANK_THRESHOLD:0.65}
+      cosine-threshold: ${RAG_REFUSAL_COSINE_THRESHOLD:0.30}
+    answerability:
+      # R4：证据充分性判定（低分直拒 → 其余交给 Judge；数据依据 docs/round4/01-Baseline分析.md）
+      enabled: ${RAG_ANSWERABILITY_ENABLED:true}
+      # Judge 失败时的降级：false=退回旧阈值行为放行（标注 JUDGE_DEGRADED）；true=保守拒答
+      fail-closed: ${RAG_ANSWERABILITY_FAIL_CLOSED:false}
+      judge-timeout-seconds: ${RAG_ANSWERABILITY_JUDGE_TIMEOUT_SECONDS:15}
+      # Judge 输入的证据字符上限（与生成上下文同源截取，控制 token 成本）
+      max-evidence-chars: ${RAG_ANSWERABILITY_MAX_EVIDENCE_CHARS:4000}
   ingestion:
     worker-threads: 2
     max-upload-size-mb: 50

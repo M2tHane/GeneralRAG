@@ -76,6 +76,7 @@ public class ChatStreamService {
     private final PromptAssembler promptAssembler;
     private final RefusalPolicy refusalPolicy;
     private final RetrievalPipeline retrievalPipeline;
+    private final com.rag.answerability.AnswerabilityPolicy answerabilityPolicy;
     private final StreamingChatModel chatModel;
     private final RagProperties ragProperties;
     private final KnowledgeBaseRepository kbRepository;
@@ -96,6 +97,7 @@ public class ChatStreamService {
                              PromptAssembler promptAssembler,
                              RefusalPolicy refusalPolicy,
                              RetrievalPipeline retrievalPipeline,
+                             com.rag.answerability.AnswerabilityPolicy answerabilityPolicy,
                              StreamingChatModel chatModel,
                              RagProperties ragProperties,
                              KnowledgeBaseRepository kbRepository,
@@ -109,6 +111,7 @@ public class ChatStreamService {
         this.promptAssembler = promptAssembler;
         this.refusalPolicy = refusalPolicy;
         this.retrievalPipeline = retrievalPipeline;
+        this.answerabilityPolicy = answerabilityPolicy;
         this.chatModel = chatModel;
         this.ragProperties = ragProperties;
         this.kbRepository = kbRepository;
@@ -208,12 +211,12 @@ public class ChatStreamService {
     }
 
     /**
-     * 非流式问答（评测复用，同一检索/上下文/prompt 路径；不写会话与消息）。
+     * 非流式问答（评测复用，同一检索/上下文/prompt/Answerability 路径；不写会话与消息）。
      *
-     * <p>R2-A1：证据不足时同样拒答并返回空引用，与流式路径语义一致——
-     * 否则评测里"拒答但挂引用"的问题会在非流式路径复现。</p>
+     * <p>R4：判定走 {@link AnswerabilityPolicy}（低分直拒 → Judge），
+     * 拒答语义与流式路径一致（拒答 + 空引用），并把判定结果带回给评测落库。</p>
      *
-     * @return 全文 + 引用（本次实际命中）+ 全量 hits + 耗时 + 是否拒答 + 分段耗时
+     * @return 全文 + 引用（本次实际命中）+ 全量 hits + 耗时 + 是否拒答 + 分段耗时 + 判定
      */
     public AnswerResult answerOnce(String kbId, String question,
                                    Integer topKOverride, Double minScoreOverride,
@@ -225,13 +228,19 @@ public class ChatStreamService {
         long retrievalMs = System.currentTimeMillis() - start;
         List<RetrievalHit> passed = hits.stream().filter(RetrievalHit::passedThreshold).toList();
 
-        // R2-A1：证据不足 → 拒答 + 空引用，且不调用模型
+        // R4：证据充分性判定（与流式同一路径）；Judge 输入=与生成同源的 Context 文本
         RetrievalPipeline.RetrievalDiagnostics diag = outcome.diagnostics();
         boolean rerankApplied = diag.rerankApplied();
-        if (refusalPolicy.insufficient(hits, diag.mode(), rerankApplied)) {
+        long judgeStart = System.currentTimeMillis();
+        com.rag.answerability.AnswerabilityDecision decision =
+                answerabilityPolicy.evaluate(hits, diag.mode(), rerankApplied,
+                        question, contextAssembler.assemble(passed).text());
+        long answerabilityMs = System.currentTimeMillis() - judgeStart;
+        if (!decision.answerable()) {
             return new AnswerResult(refusalPolicy.refusalAnswer(), List.of(), hits,
                     System.currentTimeMillis() - start, retrievalMs,
-                    System.currentTimeMillis() - start - retrievalMs, true);
+                    System.currentTimeMillis() - start - retrievalMs - answerabilityMs, true,
+                    decision, answerabilityMs);
         }
 
         Context context = contextAssembler.assemble(passed);
@@ -273,13 +282,16 @@ public class ChatStreamService {
         }
         long totalMs = System.currentTimeMillis() - start;
         return new AnswerResult(full.toString(), buildCitations(passed), hits, totalMs,
-                retrievalMs, totalMs - retrievalMs, false);
+                retrievalMs, totalMs - retrievalMs - answerabilityMs, false,
+                decision, answerabilityMs);
     }
 
     /** 非流式回答聚合结果（eval 复用）。 */
     public record AnswerResult(String answer, List<Map<String, Object>> citations,
                                List<RetrievalHit> hits, long elapsedMs,
-                               long retrievalMs, long generationMs, boolean refusal) {
+                               long retrievalMs, long generationMs, boolean refusal,
+                               com.rag.answerability.AnswerabilityDecision answerability,
+                               long answerabilityMs) {
     }
 
     /** 问答流命令（controller 请求体映射；约束对齐契约 QAStreamRequest）。 */
@@ -331,23 +343,46 @@ public class ChatStreamService {
                     RetrievalRequest.of(state.kbId, state.question));
             List<RetrievalHit> hits = outcome.hits();
             List<RetrievalHit> passed = hits.stream().filter(RetrievalHit::passedThreshold).toList();
-            // R2-A1：先判证据是否充足。不足则拒答并清空引用——
-            // 即使检索有高于 minScore 的命中（第一轮的矛盾来源），也不把它当作来源。
+            // R4：证据充分性判定（低分直拒 → 其余 Judge，共享 AnswerabilityPolicy）。
+            // 判定输入与生成同源：ContextAssembler 的产物既喂 Judge 也喂生成 Prompt。
             RetrievalPipeline.RetrievalDiagnostics diag = outcome.diagnostics();
             boolean rerankApplied = diag.rerankApplied();
-            boolean insufficient = refusalPolicy.insufficient(hits, diag.mode(), rerankApplied);
+            com.rag.answerability.AnswerabilityDecision decision =
+                    answerabilityPolicy.evaluate(hits, diag.mode(), rerankApplied,
+                            state.question, contextAssembler.assemble(passed).text());
+            boolean insufficient = !decision.answerable();
             state.refusal = insufficient;
             state.citations = insufficient ? List.of() : buildCitations(passed);
+            state.answerability = decision;
             long elapsedMs = System.currentTimeMillis() - retrievalStart;
             double topScore = hits.stream().mapToDouble(RetrievalHit::score).max().orElse(0.0);
-            // stage 行如实反映检索真相：命中多少块；拒答时说明最高分与阈值口径，不谎报 0 命中
-            String retrievalDetail = insufficient
-                    ? "命中 " + hits.size() + " 块 · 最高分 " + fmt3(topScore)
-                            + "（" + refusalPolicy.scaleName(diag.mode(), rerankApplied) + " 口径）"
-                            + " 低于证据阈值 " + fmt2(refusalPolicy.thresholdFor(diag.mode(), rerankApplied))
-                            + " · " + elapsedMs + "ms"
-                    : "命中 " + passed.size() + " 块 · " + elapsedMs + "ms";
+            // stage 行如实反映检索真相与判定原因：按 decisionType 给出说明，不把 Judge 拒答谎报成低分
+            String retrievalDetail = switch (decision.decisionType()) {
+                case LOW_SCORE_REFUSAL -> "命中 " + hits.size() + " 块 · 最高分 " + fmt3(topScore)
+                        + "（" + refusalPolicy.scaleName(diag.mode(), rerankApplied) + " 口径）"
+                        + " 低于证据阈值 " + fmt2(refusalPolicy.thresholdFor(diag.mode(), rerankApplied))
+                        + " · " + elapsedMs + "ms";
+                case NO_HITS -> "未命中任何分块 · " + elapsedMs + "ms";
+                case JUDGE_REFUSE -> "命中 " + hits.size() + " 块（最高分 " + fmt3(topScore) + "）"
+                        + " · 判定证据不足以完整回答 · " + elapsedMs + "ms";
+                case JUDGE_DEGRADED -> "命中 " + hits.size() + " 块（最高分 " + fmt3(topScore) + "）"
+                        + " · Judge 降级（" + (decision.answerable() ? "放行" : "拒答") + "）· " + elapsedMs + "ms";
+                case ANSWERABILITY_DISABLED -> refusalPolicy.insufficient(hits, diag.mode(), rerankApplied)
+                        ? "命中 " + hits.size() + " 块 · 最高分 " + fmt3(topScore)
+                                + "（" + refusalPolicy.scaleName(diag.mode(), rerankApplied) + " 口径）"
+                                + " 低于证据阈值 " + fmt2(refusalPolicy.thresholdFor(diag.mode(), rerankApplied))
+                                + " · " + elapsedMs + "ms"
+                        : "命中 " + passed.size() + " 块 · " + elapsedMs + "ms";
+                case JUDGE_ACCEPT -> "命中 " + passed.size() + " 块 · " + elapsedMs + "ms";
+            };
             send(state, "stage", new StageEvent("RETRIEVAL_COMPLETED", retrievalDetail, elapsedMs));
+            if (state.terminal.get()) {
+                return;
+            }
+
+            // R4：Answerability 判定完成的进度表达（仅进度，confidence/reason 不进 SSE 用户内容）
+            send(state, "stage", new StageEvent("ANSWERABILITY_CHECKED",
+                    decisionLabel(decision), decision.latencyMs()));
             if (state.terminal.get()) {
                 return;
             }
@@ -358,12 +393,10 @@ public class ChatStreamService {
                 return;
             }
 
-            // R2-A1：证据不足不调用模型，直接流式输出拒答文案（避免模型在低相关证据上编造）
+            // R2-A1/R4：证据不足不调用模型，直接流式输出拒答文案（避免模型在低相关证据上编造）
             if (insufficient) {
-                log.info("证据不足，拒答并清空引用 clientRequestId={} topScore={} scale={} threshold={}",
-                        state.clientRequestId, topScore,
-                        refusalPolicy.scaleName(diag.mode(), rerankApplied),
-                        refusalPolicy.thresholdFor(diag.mode(), rerankApplied));
+                log.info("证据不足，拒答并清空引用 clientRequestId={} decisionType={} reason={}",
+                        state.clientRequestId, decision.decisionType(), decision.reason());
                 streamRefusal(state);
                 return;
             }
@@ -380,6 +413,19 @@ public class ChatStreamService {
             log.error("问答流未预期异常 clientRequestId={}", state.clientRequestId, e);
             failTerminal(state, ErrorCode.INTERNAL_ERROR, "服务内部错误，请稍后重试");
         }
+    }
+
+    /** ANSWERABILITY_CHECKED stage 的简述（不含 confidence/reason——那是 Debug/Eval 信息）。 */
+    private static String decisionLabel(com.rag.answerability.AnswerabilityDecision decision) {
+        return switch (decision.decisionType()) {
+            case LOW_SCORE_REFUSAL -> "证据充分性判定：低分拒答";
+            case NO_HITS -> "证据充分性判定：无命中";
+            case JUDGE_ACCEPT -> "证据充分性判定：可回答";
+            case JUDGE_REFUSE -> "证据充分性判定：证据不足";
+            case JUDGE_DEGRADED -> decision.answerable()
+                    ? "证据充分性判定：Judge 降级放行" : "证据充分性判定：Judge 降级拒答";
+            case ANSWERABILITY_DISABLED -> "证据充分性判定：关闭（旧阈值行为）";
+        };
     }
 
     /**
@@ -726,6 +772,8 @@ public class ChatStreamService {
 
         /** R2-A1：本次是否因证据不足而拒答（拒答时 citations 恒为空数组）。 */
         volatile boolean refusal;
+        /** R4：本次 Answerability 判定（含决策类型/置信度/原因，落库到消息与调试可查）。 */
+        volatile com.rag.answerability.AnswerabilityDecision answerability;
         volatile String userMessageId;
         volatile Future<?> heartbeat;
         volatile Future<?> watchdog;

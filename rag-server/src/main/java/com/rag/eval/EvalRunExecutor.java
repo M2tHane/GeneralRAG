@@ -180,6 +180,17 @@ public class EvalRunExecutor {
         // R2-E3：拒答正确率 = (资料外题正确拒答 + 资料内题未误拒) / 全部题
         int refusalCorrect = 0;
         int refusalTotal = 0;
+        // R4：Answerability 混淆矩阵与 Judge 成本统计
+        int refusedCount = 0;
+        int judgeInvokedCount = 0;
+        int judgeDegradedCount = 0;
+        long judgeLatencySum = 0;
+        int tpCount = 0;
+        int fpCount = 0;
+        int fnCount = 0;
+        int tnCount = 0;
+        // R4：按类别拆分（定位哪类题出错）
+        Map<String, int[]> categoryStats = new java.util.LinkedHashMap<>();
         List<Integer> latencies = new java.util.ArrayList<>();
 
         for (EvalDatasetItemEntity item : datasetItems) {
@@ -255,6 +266,28 @@ public class EvalRunExecutor {
                 if (item.isAnswerable() == !refused) {
                     refusalCorrect++;
                 }
+                if (refused) {
+                    refusedCount++;
+                    if (item.isAnswerable()) {
+                        fnCount++;
+                    } else {
+                        tnCount++;
+                    }
+                } else if (item.isAnswerable()) {
+                    tpCount++;
+                } else {
+                    fpCount++;
+                }
+                // R4：类别拆分统计（expectedAnswerable / refused / misjudged）
+                String catKey = item.getCategory() == null ? "UNKNOWN" : item.getCategory().name();
+                int[] stat = categoryStats.computeIfAbsent(catKey, k -> new int[3]);
+                stat[0]++; // 样本数
+                if (refused) {
+                    stat[1]++; // 拒答数
+                }
+                if (item.isAnswerable() == refused) {
+                    stat[2]++; // 判错数（应答被拒 + 不应答被答）
+                }
             }
 
             runItem.setRetrieved(retrieved);
@@ -271,6 +304,26 @@ public class EvalRunExecutor {
                 runItem.setGenerationMs(toIntMs(answer.generationMs()));
                 totalRetrieval += answer.retrievalMs();
                 totalGeneration += answer.generationMs();
+                // R4：系统实际决策落库（混淆矩阵的数据源，杜绝"靠回答文案反推"）
+                runItem.setRefused(answer.refusal());
+                com.rag.answerability.AnswerabilityDecision dec = answer.answerability();
+                if (dec != null) {
+                    runItem.setAnswerabilityDecisionType(dec.decisionType());
+                    runItem.setAnswerabilityConfidence(dec.confidence());
+                    runItem.setAnswerabilityReason(truncate(dec.reason() == null ? "" : dec.reason(), 500));
+                    runItem.setAnswerabilityDegraded(dec.degraded());
+                    runItem.setAnswerabilityLatencyMs(toIntMs(dec.latencyMs()));
+                    if (dec.degraded()) {
+                        judgeDegradedCount++;
+                    }
+                    if (dec.judgeInvoked()) {
+                        judgeInvokedCount++;
+                        judgeLatencySum += dec.latencyMs();
+                    }
+                }
+            }
+            if (answer != null && answer.refusal()) {
+                refusedCount++;
             }
             runItemRepository.save(runItem);
 
@@ -300,6 +353,9 @@ public class EvalRunExecutor {
                 : round4((double) refusalCorrect / refusalTotal));
         metrics.put("answerableCount", answerableCount);
         metrics.put("outOfKbCount", refusalTotal - answerableCount);
+        // R4：Answerability 混淆矩阵（逐题累计：TP=应答且答 FP=不应答却答 FN=应答却拒 TN=不应答且拒）
+        metrics.put("answerabilityConfusion", confusionMetrics(refusalTotal, judgeInvokedCount,
+                judgeDegradedCount, judgeLatencySum, categoryStats, tpCount, fpCount, fnCount, tnCount));
         // R2-L1：耗时拆分与分位数
         metrics.put("avgLatencyMs", executed == 0 ? null : round4((double) totalLatency / executed));
         metrics.put("retrievalMsAvg", executed == 0 ? null : round4((double) totalRetrieval / executed));
@@ -351,6 +407,51 @@ public class EvalRunExecutor {
             retrieved.add(evalHit);
         }
         return retrieved;
+    }
+
+    /**
+     * R4 Answerability 混淆矩阵与派生指标。
+     *
+     * <p>定义（False Answer Rate 是本轮核心指标——企业知识库中"没答案却自信回答"
+     * 比偶尔误拒风险更高）：</p>
+     * <ul>
+     *   <li>falseAnswerRate = FP/(FP+TN)：实际不可回答的问题中被错误回答的比例</li>
+     *   <li>falseRefusalRate = FN/(FN+TP)：实际可回答的问题中被错误拒答的比例</li>
+     *   <li>answerablePrecision = TP/(TP+FP)；answerableRecall = TP/(TP+FN)</li>
+     *   <li>refusalPrecision = TN/(TN+FN)；refusalRecall = TN/(TN+FP)</li>
+     *   <li>judgeInvocationRate = 调 Judge 题数 / 已执行题数（成本）</li>
+     *   <li>judgeDegradedRate = Judge 降级题数 / 已调 Judge 题数（可用性）</li>
+     * </ul>
+     */
+    private static Map<String, Object> confusionMetrics(int executed, int judgeInvoked,
+                                                        int judgeDegraded, long judgeLatencySum,
+                                                        Map<String, int[]> categoryStats,
+                                                        int tp, int fp, int fn, int tn) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("tp", tp);
+        m.put("fp", fp);
+        m.put("fn", fn);
+        m.put("tn", tn);
+        m.put("falseAnswerRate", (fp + tn) == 0 ? null : round4((double) fp / (fp + tn)));
+        m.put("falseRefusalRate", (fn + tp) == 0 ? null : round4((double) fn / (fn + tp)));
+        m.put("answerablePrecision", (tp + fp) == 0 ? null : round4((double) tp / (tp + fp)));
+        m.put("answerableRecall", (tp + fn) == 0 ? null : round4((double) tp / (tp + fn)));
+        m.put("refusalPrecision", (tn + fn) == 0 ? null : round4((double) tn / (tn + fn)));
+        m.put("refusalRecall", (tn + fp) == 0 ? null : round4((double) tn / (tn + fp)));
+        m.put("judgeInvocationRate", executed == 0 ? null : round4((double) judgeInvoked / executed));
+        m.put("judgeDegradedRate", judgeInvoked == 0 ? null : round4((double) judgeDegraded / judgeInvoked));
+        m.put("judgeLatencyMsAvg", judgeInvoked == 0 ? null : round4((double) judgeLatencySum / judgeInvoked));
+        Map<String, Object> breakdown = new LinkedHashMap<>();
+        for (Map.Entry<String, int[]> e : categoryStats.entrySet()) {
+            int[] stat = e.getValue();
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("count", stat[0]);
+            row.put("refused", stat[1]);
+            row.put("misjudged", stat[2]);
+            breakdown.put(e.getKey(), row);
+        }
+        m.put("categoryBreakdown", breakdown);
+        return m;
     }
 
     /** 分位数（最近秩法；样本为空返回 null）。 */

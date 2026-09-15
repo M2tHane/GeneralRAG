@@ -272,7 +272,11 @@ export function reviewEvalRunItem(
 // ---------------- SSE 流式问答 ----------------
 
 export interface StreamEventStage {
-  stage: "RETRIEVAL_STARTED" | "RETRIEVAL_COMPLETED" | "GENERATION_STARTED";
+  stage:
+    | "RETRIEVAL_STARTED"
+    | "RETRIEVAL_COMPLETED"
+    | "ANSWERABILITY_CHECKED"
+    | "GENERATION_STARTED";
   detail?: string;
   elapsedMs?: number;
 }
