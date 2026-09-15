@@ -26,7 +26,8 @@ import org.springframework.web.multipart.MultipartFile;
  *       answerable（boolean，缺省 true）、category（EvalCategory，必填合法值）、
  *       evidence（EvidenceRef[]，可缺省为 []）；</li>
  *   <li>{@code .csv}：表头须含 question/answerable/category（同名字段），
- *       evidence 列为 JSON 字符串数组（如 {@code [{"docName":"...","titlePath":"..."}]}）。</li>
+ *       evidence/history 列为 JSON 字符串数组（如 {@code [{"docName":"...","titlePath":"..."}]}）。
+ *       可选 history（R4.1）：[{role: user|assistant, content}] 时间正序，仅用于解析当前问题指代。</li>
  * </ul>
  *
  * <p>失败统一抛 {@link DomainException}(INVALID_DATASET_FILE, 422)，message
@@ -37,9 +38,10 @@ public class DatasetFileParser {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    /** 解析产物（纯结构，与 JPA 实体解耦）。 */
+    /** 解析产物（纯结构，与 JPA 实体解耦）。history 为可选对话历史（R4.1 FOLLOW_UP 口径）。 */
     public record EvalItem(String question, String referenceAnswer,
                            List<Map<String, Object>> evidence,
+                           List<Map<String, Object>> history,
                            boolean answerable, EvalCategory category) {
     }
 
@@ -214,7 +216,7 @@ public class DatasetFileParser {
             category = EvalCategory.valueOf(String.valueOf(rawCategory));
         } catch (IllegalArgumentException e) {
             throw invalid(location + "：非法 category '" + rawCategory
-                    + "'（合法值：DIRECT/TERM_VARIATION/FOLLOW_UP/OUT_OF_KB/CONFUSABLE）");
+                    + "'（合法值：DIRECT/TERM_VARIATION/FOLLOW_UP/OUT_OF_KB/CONFUSABLE/PARTIAL_EVIDENCE）");
         }
         Boolean answerable = true;
         Object rawAnswerable = row.get("answerable");
@@ -230,27 +232,66 @@ public class DatasetFileParser {
                 throw invalid(location + "：answerable 不是合法布尔值：" + rawAnswerable);
             }
         }
-        List<Map<String, Object>> evidence;
-        Object rawEvidence = row.get("evidence");
-        if (rawEvidence == null) {
-            evidence = List.of();
-        } else if (rawEvidence instanceof List<?> list) {
-            evidence = new ArrayList<>();
-            for (Object o : list) {
-                if (!(o instanceof Map)) {
-                    throw invalid(location + "：evidence 数组元素必须为对象（docName/titlePath 等）");
-                }
-                @SuppressWarnings("unchecked")
-                Map<String, Object> m = (Map<String, Object>) o;
-                evidence.add(m);
-            }
-        } else {
-            throw invalid(location + "：evidence 必须是数组");
-        }
+        List<Map<String, Object>> evidence = toEvidence(row.get("evidence"), location);
         Object reference = row.get("referenceAnswer");
         String referenceAnswer = reference == null || String.valueOf(reference).isBlank()
                 ? null : String.valueOf(reference);
-        return new EvalItem(q.trim(), referenceAnswer, evidence, answerable, category);
+        List<Map<String, Object>> history = toHistory(row.get("history"), location);
+        return new EvalItem(q.trim(), referenceAnswer, evidence, history, answerable, category);
+    }
+
+    /** evidence 解析（与旧实现一致，抽出便于 history 复用数组校验路径）。 */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> toEvidence(Object rawEvidence, String location) {
+        if (rawEvidence == null) {
+            return List.of();
+        }
+        if (!(rawEvidence instanceof List<?> list)) {
+            throw invalid(location + "：evidence 必须是数组");
+        }
+        List<Map<String, Object>> evidence = new ArrayList<>();
+        for (Object o : list) {
+            if (!(o instanceof Map)) {
+                throw invalid(location + "：evidence 数组元素必须为对象（docName/titlePath 等）");
+            }
+            evidence.add((Map<String, Object>) o);
+        }
+        return evidence;
+    }
+
+    /**
+     * 可选 history 解析（R4.1 FOLLOW_UP 口径修正）：数组元素必须为
+     * {role: "user"|"assistant", content: 非空字符串}，时间正序（不校验内容语义）。
+     * 缺省/null = 无历史。
+     */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> toHistory(Object rawHistory, String location) {
+        if (rawHistory == null) {
+            return List.of();
+        }
+        if (!(rawHistory instanceof List<?> list)) {
+            throw invalid(location + "：history 必须是数组");
+        }
+        List<Map<String, Object>> history = new ArrayList<>();
+        for (int i = 0; i < list.size(); i++) {
+            Object o = list.get(i);
+            if (!(o instanceof Map)) {
+                throw invalid(location + "：history[" + i + "] 必须为对象 {role, content}");
+            }
+            Map<String, Object> turn = (Map<String, Object>) o;
+            Object role = turn.get("role");
+            Object content = turn.get("content");
+            boolean roleOk = role instanceof String r
+                    && ("user".equalsIgnoreCase(r) || "assistant".equalsIgnoreCase(r));
+            if (!roleOk) {
+                throw invalid(location + "：history[" + i + "].role 必须为 user 或 assistant");
+            }
+            if (!(content instanceof String c) || c.isBlank()) {
+                throw invalid(location + "：history[" + i + "].content 必须为非空字符串");
+            }
+            history.add(turn);
+        }
+        return history;
     }
 
     private static DomainException invalid(String message) {

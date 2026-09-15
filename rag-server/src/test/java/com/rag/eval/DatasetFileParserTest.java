@@ -182,4 +182,65 @@ class DatasetFileParserTest {
                 .isInstanceOfSatisfying(DomainException.class, e ->
                         assertThat(e.getCode()).isEqualTo(ErrorCode.INVALID_DATASET_FILE));
     }
+
+    // ---------- R4.1：history（FOLLOW_UP 口径修正） ----------
+
+    @Test
+    void parsesHistoryAndKeepsOrder() {
+        String json = """
+                [
+                  {"question":"那对因此分配失败的分片，还要做什么？","category":"FOLLOW_UP",
+                   "answerable":true,
+                   "history":[
+                     {"role":"user","content":"ES 磁盘洪泛水位是多少？"},
+                     {"role":"assistant","content":"97% 触发只读块。"}
+                   ]}
+                ]""";
+        List<DatasetFileParser.EvalItem> items = parser.parse("ds.json", bytes(json));
+        assertThat(items).hasSize(1);
+        assertThat(items.get(0).history()).hasSize(2);
+        assertThat(items.get(0).history().get(0)).containsEntry("role", "user");
+        assertThat(items.get(0).history().get(1)).containsEntry("role", "assistant");
+    }
+
+    @Test
+    void historyMissingDefaultsToEmpty() {
+        String json = """
+                [{"question":"q","category":"DIRECT"}]""";
+        List<DatasetFileParser.EvalItem> items = parser.parse("ds.json", bytes(json));
+        assertThat(items.get(0).history()).isEmpty();
+    }
+
+    @Test
+    void historyIllegalRoleRejected() {
+        String json = """
+                [{"question":"q","category":"FOLLOW_UP","history":[{"role":"system","content":"x"}]}]""";
+        assertThatThrownBy(() -> parser.parse("ds.json", bytes(json)))
+                .isInstanceOfSatisfying(DomainException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(ErrorCode.INVALID_DATASET_FILE);
+                    assertThat(e.getMessage()).contains("history[0].role");
+                });
+    }
+
+    @Test
+    void historyBlankContentRejected() {
+        String json = """
+                [{"question":"q","category":"FOLLOW_UP","history":[{"role":"user","content":"  "}]}]""";
+        assertThatThrownBy(() -> parser.parse("ds.json", bytes(json)))
+                .isInstanceOfSatisfying(DomainException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(ErrorCode.INVALID_DATASET_FILE);
+                    assertThat(e.getMessage()).contains("history[0].content");
+                });
+    }
+
+    @Test
+    void historyNonArrayRejected() {
+        String json = """
+                [{"question":"q","category":"FOLLOW_UP","history":"昨天聊的"}]""";
+        assertThatThrownBy(() -> parser.parse("ds.json", bytes(json)))
+                .isInstanceOfSatisfying(DomainException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(ErrorCode.INVALID_DATASET_FILE);
+                    assertThat(e.getMessage()).contains("history 必须是数组");
+                });
+    }
 }

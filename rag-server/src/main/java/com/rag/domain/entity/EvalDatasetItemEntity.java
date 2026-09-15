@@ -53,6 +53,14 @@ public class EvalDatasetItemEntity {
     @Column(name = "evidence", columnDefinition = "json")
     private List<Map<String, Object>> evidence;
 
+    /**
+     * 可选对话历史（R4.1：FOLLOW_UP 口径修正），结构 = [{role,content}] 时间正序。
+     * 仅用于解析当前问题的指代（生成 prompt 历史区），不构成回答证据；NULL=无历史。
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "history", columnDefinition = "json")
+    private List<Map<String, Object>> history;
+
     /** 是否应可回答：true=是（默认），false=知识库外问题（预期拒答）。 */
     @Column(name = "answerable", nullable = false)
     private boolean answerable = true;
@@ -118,6 +126,14 @@ public class EvalDatasetItemEntity {
 
     public void setEvidence(List<Map<String, Object>> evidence) {
         this.evidence = evidence;
+    }
+
+    public List<Map<String, Object>> getHistory() {
+        return history;
+    }
+
+    public void setHistory(List<Map<String, Object>> history) {
+        this.history = history;
     }
 
     public boolean isAnswerable() {

@@ -597,9 +597,11 @@ paths:
       description: |
         multipart 上传：按文件扩展名/内容识别 .json 或 .csv。每次导入在该数据集下产生一个
         不可变版本（versionNo 递增）。字段：question（必填）、referenceAnswer、evidence
-        （相关文档/证据引用数组）、answerable（是否可回答）、category
-        （DIRECT/TERM_VARIATION/FOLLOW_UP/OUT_OF_KB/CONFUSABLE）。JSON 文件为对象数组；
-        CSV 表头须与字段同名（evidence 列为 JSON 字符串）。
+        （相关文档/证据引用数组）、history（可选，[{role: user|assistant, content}] 时间正序，
+        R4.1 起支持——FOLLOW_UP 类样本提供会话历史以解析指代；历史仅用于理解当前问题，
+        不构成回答证据，检索仍只使用当前问题）、answerable（是否可回答）、category
+        （DIRECT/TERM_VARIATION/FOLLOW_UP/OUT_OF_KB/CONFUSABLE/PARTIAL_EVIDENCE）。
+        JSON 文件为对象数组；CSV 表头须与字段同名（evidence/history 列为 JSON 字符串）。
       requestBody:
         required: true
         content:

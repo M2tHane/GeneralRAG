@@ -131,6 +131,7 @@ public class EvalService {
             entity.setQuestion(item.question());
             entity.setReferenceAnswer(item.referenceAnswer());
             entity.setEvidence(item.evidence());
+            entity.setHistory(item.history() == null || item.history().isEmpty() ? null : item.history());
             entity.setAnswerable(item.answerable());
             entity.setCategory(item.category());
             entities.add(entity);

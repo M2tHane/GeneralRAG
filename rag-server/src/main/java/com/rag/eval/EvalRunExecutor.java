@@ -1,5 +1,6 @@
 package com.rag.eval;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,7 +16,9 @@ import com.rag.domain.entity.EvalDatasetItemEntity;
 import com.rag.domain.entity.EvalRunEntity;
 import com.rag.domain.entity.EvalRunItemEntity;
 import com.rag.domain.enums.EvalRunStatus;
+import com.rag.domain.enums.SessionRole;
 import com.rag.llm.ChatStreamService;
+import com.rag.llm.PromptAssembler;
 import com.rag.retrieval.RetrievalService;
 import com.rag.retrieval.model.RetrievalHit;
 import com.rag.retrieval.model.RetrievalStages;
@@ -206,7 +209,7 @@ public class EvalRunExecutor {
             boolean executionFailed = false;
             try {
                 answer = chatStreamService.answerOnce(run.getKbId(), item.getQuestion(),
-                        topK, minScore, List.of());
+                        topK, minScore, toHistoryTurns(item.getHistory()));
                 hits = answer.hits();
             } catch (RuntimeException e) {
                 // M6-②：单题执行失败 ≠ 未召回——hit 记 NULL 并退出 Hit@K 分母，
@@ -452,6 +455,30 @@ public class EvalRunExecutor {
         }
         m.put("categoryBreakdown", breakdown);
         return m;
+    }
+
+    /**
+     * 数据集样本 history → 会话历史轻量结构（R4.1 FOLLOW_UP 口径修正）。
+     * 结构 = [{role: user|assistant, content}]（导入时已校验，此处防御性兜底）。
+     * 检索仍只使用当前问题（本系统无 query rewrite——评测测的是当前真实系统）；
+     * 历史仅进入生成 prompt 的历史区与 Judge 的指代解析区，均不构成证据。
+     */
+    private static List<PromptAssembler.HistoryTurn> toHistoryTurns(List<Map<String, Object>> history) {
+        if (history == null || history.isEmpty()) {
+            return List.of();
+        }
+        List<PromptAssembler.HistoryTurn> turns = new ArrayList<>(history.size());
+        for (Map<String, Object> turn : history) {
+            Object role = turn.get("role");
+            Object content = turn.get("content");
+            if (!(role instanceof String r) || !(content instanceof String c) || c.isBlank()) {
+                continue; // 防御：导入已校验，异常形态跳过而非失败整轮
+            }
+            turns.add(new PromptAssembler.HistoryTurn(
+                    "assistant".equalsIgnoreCase(r) ? SessionRole.ASSISTANT : SessionRole.USER,
+                    c));
+        }
+        return turns;
     }
 
     /** 分位数（最近秩法；样本为空返回 null）。 */
