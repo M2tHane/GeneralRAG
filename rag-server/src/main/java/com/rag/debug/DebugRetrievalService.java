@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.rag.answerability.AnswerabilityDecision;
+import com.rag.answerability.AnswerabilityInput;
 import com.rag.answerability.AnswerabilityPolicy;
 import com.rag.config.RagProperties;
 import com.rag.retrieval.ContextAssembler;
@@ -67,9 +68,9 @@ public class DebugRetrievalService {
         List<RetrievalHit> passed = ranked.stream().filter(RetrievalHit::passedThreshold).toList();
         Context context = contextAssembler.assemble(passed);
 
-        // R4：与问答同一条判定路径——低分直拒 → Judge；判定输入=同源 Context
+        // R4/R4.1：与问答同一条判定路径——低分直拒 → Judge；判定输入=同一 Context 实例
         AnswerabilityDecision decision = answerabilityPolicy.evaluate(
-                ranked, diag.mode(), diag.rerankApplied(), question, context.text());
+                AnswerabilityInput.of(question, context, ranked, diag.mode(), diag.rerankApplied()));
 
         RagProperties.Rerank rerankCfg = ragProperties.getRetrieval().getRerank();
         boolean rerankEnabled = diag.mode() == RetrievalMode.HYBRID_RERANK;

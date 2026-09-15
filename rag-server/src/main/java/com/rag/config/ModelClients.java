@@ -47,16 +47,24 @@ public class ModelClients {
      * 但 temperature=0：判定要求确定性，不应采样发散。与生成模型是两个
      * 独立实例——Judge 与生成 Prompt 互不污染（Judge 的输出不进入生成上下文，
      * 生成的历史也不进入 Judge）。</p>
+     *
+     * <p><b>R4.1 timeout 语义</b>：本模型的 HTTP connect/read timeout 直接取
+     * {@code rag.retrieval.answerability.judge-timeout-seconds}——判定失败的
+     * "超时"只有一种含义：模型请求在约定时间内没有完成。langchain4j 的
+     * 同步 {@code chat()} 在 read timeout 处硬超时（底层 JDK HttpClient 按
+     * 请求级 timeout 中断并抛 HttpTimeoutException），因此不存在"上层已放弃、
+     * 底层请求仍在跑"的假取消；调用线程的阻塞时长上界 = 该超时值。</p>
      */
     @Bean(name = "judgeChatModel")
     public ChatModel judgeChatModel(RagProperties ragProperties) {
         RagProperties.Chat chat = ragProperties.getModels().getChat();
+        int judgeTimeoutSeconds = ragProperties.getRetrieval().getAnswerability().getJudgeTimeoutSeconds();
         return OpenAiChatModel.builder()
                 .baseUrl(chat.getBaseUrl())
                 .apiKey(chat.getApiKey())
                 .modelName(chat.getModelName())
                 .temperature(0.0)
-                .timeout(Duration.ofSeconds(chat.getTimeoutSeconds()))
+                .timeout(Duration.ofSeconds(judgeTimeoutSeconds))
                 .build();
     }
 

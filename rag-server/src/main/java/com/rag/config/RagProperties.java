@@ -506,18 +506,32 @@ public class RagProperties {
         private boolean failClosed = false;
 
         /**
-         * Judge 判定超时（秒）。Judge 在生成前串行执行，超时太长会拖垮问答首 token；
-         * 取 chat timeout 的约 1/6（chat 默认 120s，Judge 只需输出短 JSON）。
+         * Judge 判定超时（秒）。R4.1 起 <b>语义 = Judge HTTP 请求超时</b>：
+         * 该值同时作为 judgeChatModel 的 connect/read timeout——同步调用在模型侧
+         * 硬超时（抛 TimeoutException），不存在"上层已放弃、底层仍在跑"的两层
+         * timeout 失配；也不再使用 executor 排队，超时值纯粹代表模型执行时间。
+         * Judge 只需输出短 JSON，实测 avg ≈ 2.6s。
          */
         @Min(value = 1, message = "rag.answerability.judge-timeout-seconds 必须 ≥ 1")
         private int judgeTimeoutSeconds = 15;
 
         /**
-         * Judge 输入的证据字符上限（从 ContextAssembler 产物截取）。与生成上下文
-         * 保持同源一致（Context.text），超长截断降低 token 成本。
+         * Judge 并发闸门（bulkhead，R4.1）：同时进入模型调用的判定数上限。
+         * 默认 4——SSE 并发上限 32、评测串行执行，判定平均 2.6s；4 路并发下
+         * 32 并发流的排队等待期望 ≈ 8 × 2.6s / 4 ≈ 5.2s，仍在 timeout 量级内，
+         * 同时避免本地单实例模型被突发并发打满（吞吐随并发恶化）。容量耗尽时
+         * 等待 {@link #bulkheadWaitMs} 后按 JUDGE_DEGRADED(OVERLOADED) 降级，
+         * 不无限排队。
          */
-        @Min(value = 200, message = "rag.answerability.max-evidence-chars 必须 ≥ 200")
-        private int maxEvidenceChars = 4000;
+        @Min(value = 1, message = "rag.answerability.max-concurrent-judges 必须 ≥ 1")
+        private int maxConcurrentJudges = 4;
+
+        /**
+         * Judge 并发闸门获取许可的最长等待（毫秒）。等待耗尽仍未获得名额
+         * → JUDGE_DEGRADED（原因 OVERLOADED），快速失败优于长时间排队拖垮首 token。
+         */
+        @Min(value = 0, message = "rag.answerability.bulkhead-wait-ms 必须 ≥ 0")
+        private long bulkheadWaitMs = 500;
 
         public boolean isEnabled() {
             return enabled;
@@ -543,12 +557,20 @@ public class RagProperties {
             this.judgeTimeoutSeconds = judgeTimeoutSeconds;
         }
 
-        public int getMaxEvidenceChars() {
-            return maxEvidenceChars;
+        public int getMaxConcurrentJudges() {
+            return maxConcurrentJudges;
         }
 
-        public void setMaxEvidenceChars(int maxEvidenceChars) {
-            this.maxEvidenceChars = maxEvidenceChars;
+        public void setMaxConcurrentJudges(int maxConcurrentJudges) {
+            this.maxConcurrentJudges = maxConcurrentJudges;
+        }
+
+        public long getBulkheadWaitMs() {
+            return bulkheadWaitMs;
+        }
+
+        public void setBulkheadWaitMs(long bulkheadWaitMs) {
+            this.bulkheadWaitMs = bulkheadWaitMs;
         }
     }
 

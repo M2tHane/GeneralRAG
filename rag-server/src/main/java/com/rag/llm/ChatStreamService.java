@@ -228,13 +228,14 @@ public class ChatStreamService {
         long retrievalMs = System.currentTimeMillis() - start;
         List<RetrievalHit> passed = hits.stream().filter(RetrievalHit::passedThreshold).toList();
 
-        // R4：证据充分性判定（与流式同一路径）；Judge 输入=与生成同源的 Context 文本
+        // R4/R4.1：证据充分性判定（与流式同一路径）。assemble 一次，同一 Context
+        // 实例既喂 Judge 也喂生成 Prompt——不存在"Judge 看前 N 字、生成看全文"的漂移
         RetrievalPipeline.RetrievalDiagnostics diag = outcome.diagnostics();
         boolean rerankApplied = diag.rerankApplied();
+        Context context = contextAssembler.assemble(passed);
         long judgeStart = System.currentTimeMillis();
-        com.rag.answerability.AnswerabilityDecision decision =
-                answerabilityPolicy.evaluate(hits, diag.mode(), rerankApplied,
-                        question, contextAssembler.assemble(passed).text());
+        com.rag.answerability.AnswerabilityDecision decision = answerabilityPolicy.evaluate(
+                com.rag.answerability.AnswerabilityInput.of(question, context, hits, diag.mode(), rerankApplied));
         long answerabilityMs = System.currentTimeMillis() - judgeStart;
         if (!decision.answerable()) {
             return new AnswerResult(refusalPolicy.refusalAnswer(), List.of(), hits,
@@ -243,7 +244,6 @@ public class ChatStreamService {
                     decision, answerabilityMs);
         }
 
-        Context context = contextAssembler.assemble(passed);
         List<ChatMessage> messages = promptAssembler.build(question, history, context);
 
         StringBuffer full = new StringBuffer(); // M2
@@ -343,13 +343,14 @@ public class ChatStreamService {
                     RetrievalRequest.of(state.kbId, state.question));
             List<RetrievalHit> hits = outcome.hits();
             List<RetrievalHit> passed = hits.stream().filter(RetrievalHit::passedThreshold).toList();
-            // R4：证据充分性判定（低分直拒 → 其余 Judge，共享 AnswerabilityPolicy）。
-            // 判定输入与生成同源：ContextAssembler 的产物既喂 Judge 也喂生成 Prompt。
+            // R4/R4.1：证据充分性判定（低分直拒 → 其余 Judge，共享 AnswerabilityPolicy）。
+            // assemble 一次：同一 Context 实例既喂 Judge 也喂生成 Prompt（§五 一致性）
             RetrievalPipeline.RetrievalDiagnostics diag = outcome.diagnostics();
             boolean rerankApplied = diag.rerankApplied();
-            com.rag.answerability.AnswerabilityDecision decision =
-                    answerabilityPolicy.evaluate(hits, diag.mode(), rerankApplied,
-                            state.question, contextAssembler.assemble(passed).text());
+            Context context = contextAssembler.assemble(passed);
+            com.rag.answerability.AnswerabilityDecision decision = answerabilityPolicy.evaluate(
+                    com.rag.answerability.AnswerabilityInput.of(
+                            state.question, context, hits, diag.mode(), rerankApplied));
             boolean insufficient = !decision.answerable();
             state.refusal = insufficient;
             state.citations = insufficient ? List.of() : buildCitations(passed);
@@ -380,14 +381,13 @@ public class ChatStreamService {
                 return;
             }
 
-            // R4：Answerability 判定完成的进度表达（仅进度，confidence/reason 不进 SSE 用户内容）
+            // R4/R4.1：Answerability 判定完成的进度表达（仅进度，confidence/reason 不进 SSE 用户内容）
             send(state, "stage", new StageEvent("ANSWERABILITY_CHECKED",
                     decisionLabel(decision), decision.latencyMs()));
             if (state.terminal.get()) {
                 return;
             }
 
-            Context context = contextAssembler.assemble(passed);
             send(state, "stage", new StageEvent("GENERATION_STARTED", null, null));
             if (state.terminal.get()) {
                 return;

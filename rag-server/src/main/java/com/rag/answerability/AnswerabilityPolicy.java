@@ -11,7 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Answerability 策略（R4）：把"证据是否足以回答"从分数推断升级为显式判定，
+ * Answerability 策略（R4 / R4.1 稳定化）：把"证据是否足以回答"从分数推断升级为显式判定，
  * <b>问答 / 调试 / 评测共用同一份真实逻辑</b>——这是 R2 确立的单一代码路径原则
  * 在判定层的延续。
  *
@@ -34,9 +34,11 @@ import org.springframework.stereotype.Component;
  * AnswerabilityPolicy 在其上叠加 Judge。旧的"只有阈值判定"行为可通过
  * {@code rag.answerability.enabled=false} 完整还原（对照实验用）。</p>
  *
- * <p><b>输入约定</b>：{@code evidenceText} 必须是 {@code ContextAssembler} 产物
- * （与送入生成模型的上下文同源同文），避免"Judge 看的"与"生成用的"证据漂移；
- * {@code question} 是用户原问题，Judge 提示词需要它独立成段（不能让它从证据区猜）。</p>
+ * <p><b>R4.1 输入约定（Evidence 一致性）</b>：判定输入是 {@link AnswerabilityInput}，
+ * 其中 {@code context} 必须是 <b>与生成共用同一个 Context 实例</b>——调用方
+ * assemble 一次、判定与 Prompt 组装各取所需，不允许"Judge 前一次、生成前又一次"
+ * 的重复组装或字数不一致的第二套证据。Judge 历史仅用于解析指代（见
+ * {@link EvidenceSufficiencyJudge} 提示词声明），不构成证据。</p>
  */
 @Component
 public class AnswerabilityPolicy {
@@ -60,25 +62,20 @@ public class AnswerabilityPolicy {
     }
 
     /**
-     * 判定证据是否足以回答（完整签名：问题与证据分开传）。
+     * 判定证据是否足以回答（R4.1：输入收敛为 {@link AnswerabilityInput}）。
      *
-     * @param hits          检索命中（含未过阈值项，与 RefusalPolicy 输入一致）
-     * @param mode          生效检索模式（决定阈值口径）
-     * @param rerankApplied 重排是否真正生效
-     * @param question      用户问题（Judge 提示词独立成段使用）
-     * @param evidenceText  与生成同源的上下文全文（ContextAssembler 产物；可为空=无上下文）
      * @return 判定结果（answerable=false 时调用方必须拒答并清空引用）
      */
-    public AnswerabilityDecision evaluate(List<RetrievalHit> hits, RetrievalMode mode,
-                                          boolean rerankApplied, String question, String evidenceText) {
+    public AnswerabilityDecision evaluate(AnswerabilityInput input) {
         long start = System.currentTimeMillis();
         RagProperties.Answerability cfg = ragProperties.getRetrieval().getAnswerability();
+        List<RetrievalHit> hits = input.hits();
 
         // 1. 关闭（对照模式）：行为=旧 RefusalPolicy 单阈值判定
         if (!cfg.isEnabled()) {
-            boolean insufficient = refusalPolicy.insufficient(hits, mode, rerankApplied);
-            double threshold = refusalPolicy.thresholdFor(mode, rerankApplied);
-            String scale = refusalPolicy.scaleName(mode, rerankApplied);
+            boolean insufficient = refusalPolicy.insufficient(hits, input.mode(), input.rerankApplied());
+            double threshold = refusalPolicy.thresholdFor(input.mode(), input.rerankApplied());
+            String scale = refusalPolicy.scaleName(input.mode(), input.rerankApplied());
             double top = topScore(hits);
             return new AnswerabilityDecision(!insufficient,
                     AnswerabilityDecisionType.ANSWERABILITY_DISABLED,
@@ -89,21 +86,22 @@ public class AnswerabilityPolicy {
         }
 
         // 2. 零命中：必然无证据
-        if (hits == null || hits.isEmpty()) {
+        if (hits.isEmpty()) {
             return AnswerabilityDecision.noHits(System.currentTimeMillis() - start);
         }
 
         // 3. 低分直拒（沿用旧双阈值校准：rerank 0.65 / cosine 0.30）
         double top = topScore(hits);
-        double lowThreshold = refusalPolicy.thresholdFor(mode, rerankApplied);
-        String scale = refusalPolicy.scaleName(mode, rerankApplied);
-        if (refusalPolicy.insufficient(hits, mode, rerankApplied)) {
+        double lowThreshold = refusalPolicy.thresholdFor(input.mode(), input.rerankApplied());
+        String scale = refusalPolicy.scaleName(input.mode(), input.rerankApplied());
+        if (refusalPolicy.insufficient(hits, input.mode(), input.rerankApplied())) {
             return AnswerabilityDecision.lowScoreRefusal(top, lowThreshold, scale);
         }
 
-        // 4. 灰区 + 高分全部交给 Judge
+        // 4. 灰区 + 高分全部交给 Judge；证据 = 与生成同一 Context 实例的全文（不截断）
         try {
-            EvidenceSufficiencyJudge.JudgeResult result = judge.judge(question, evidenceText);
+            EvidenceSufficiencyJudge.JudgeResult result = judge.judge(
+                    input.question(), input.history(), evidenceText(input));
             long latency = System.currentTimeMillis() - start;
             return result.answerable()
                     ? AnswerabilityDecision.judgeAccept(result.confidence(), result.reason(), latency)
@@ -123,9 +121,13 @@ public class AnswerabilityPolicy {
         }
     }
 
+    /** Judge 证据文本：与生成完全同一份（Context.text），不做任何二次截断。 */
+    private static String evidenceText(AnswerabilityInput input) {
+        return input.context() == null ? "" : input.context().text();
+    }
+
     private static double topScore(List<RetrievalHit> hits) {
-        return hits == null ? 0.0
-                : hits.stream().mapToDouble(RetrievalHit::score).max().orElse(0.0);
+        return hits.stream().mapToDouble(RetrievalHit::score).max().orElse(0.0);
     }
 
     private static String fmt(double v) {

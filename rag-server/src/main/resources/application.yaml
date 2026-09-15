@@ -112,8 +112,11 @@ rag:
       # Judge 失败时的降级：false=退回旧阈值行为放行（标注 JUDGE_DEGRADED）；true=保守拒答
       fail-closed: ${RAG_ANSWERABILITY_FAIL_CLOSED:false}
       judge-timeout-seconds: ${RAG_ANSWERABILITY_JUDGE_TIMEOUT_SECONDS:15}
-      # Judge 输入的证据字符上限（与生成上下文同源截取，控制 token 成本）
-      max-evidence-chars: ${RAG_ANSWERABILITY_MAX_EVIDENCE_CHARS:4000}
+      # R4.1 bulkhead 并发闸门：同时进入 Judge 模型调用的判定数上限；容量耗尽按 OVERLOADED 快速降级
+      max-concurrent-judges: ${RAG_ANSWERABILITY_MAX_CONCURRENT_JUDGES:4}
+      # 获取 Judge 名额的最长等待（毫秒）；耗尽仍未获得名额 → JUDGE_DEGRADED(OVERLOADED)
+      bulkhead-wait-ms: ${RAG_ANSWERABILITY_BULKHEAD_WAIT_MS:500}
+      # R4.1：judge-timeout-seconds 同时作为 Judge HTTP connect/read timeout（单一超时语义）
   ingestion:
     worker-threads: 2
     max-upload-size-mb: 50
