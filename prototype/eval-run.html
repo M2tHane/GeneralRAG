@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>运行详情 · 效果评测 · 通用知识问答 RAG 原型</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  /* ---------- 页面私有样式（运行详情 / 对比） ---------- */
+  .content-inner.page-fill { height: 100%; min-height: 0; }
+  #page-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .table-wrap.fill { flex: 1; min-height: 200px; overflow: auto; }
+  #items-pagination { padding: 12px 2px 28px; margin-top: 0; }
+
+  #items-table { min-width: 1080px; }
+  #diff-table { min-width: 1240px; }
+  .items-row { cursor: pointer; }
+  .items-row.row-open { background: var(--surface-subtle); }
+  .sub-row > td { background: var(--surface-subtle); padding: 16px 20px 20px; }
+  .sub-row:hover > td { background: var(--surface-subtle); }
+  .expand-caret { display: inline-block; width: 12px; color: var(--muted-foreground); font-size: 11px; }
+  .metric-none { color: var(--muted-foreground); }
+
+  .metric-bar-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .metric-bar-row .spacer { flex: 1; }
+  .metric-bar .metric .arrow-v { font-size: 13px; color: var(--muted-foreground); font-weight: 400; }
+
+  .section { margin-bottom: 28px; }
+  .section-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  .section-head h2 { font-size: 16px; font-weight: 600; margin: 0; }
+  .section-head .spacer { flex: 1; }
+  .section-hint { font-size: 13px; color: var(--muted-foreground); line-height: 18px; }
+  .card-block { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 16px 20px; }
+
+  .rank-dist-row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .rank-dist-row .rd-hint { font-size: 13px; color: var(--muted-foreground); }
+
+  .degraded-line {
+    font-size: 14px; font-weight: 500; color: var(--warning);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .degraded-line svg { width: 15px; height: 15px; flex: none; }
+
+  .sub-block { margin-top: 16px; }
+  .sub-block:first-child { margin-top: 0; }
+  .sub-block > h4 {
+    font-size: 14px; font-weight: 600; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .sub-block > h4 .tagline { font-size: 13px; font-weight: 400; color: var(--muted-foreground); }
+  .hitmark { font-size: 14px; font-weight: 500; }
+  .hitmark.ok { color: var(--success); }
+  .hitmark.no { color: var(--destructive); }
+  .hitmark.na { color: var(--muted-foreground); font-weight: 400; }
+  .lat-split { font-size: 13px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+  .reason-line { font-size: 13px; line-height: 18px; color: var(--muted-foreground); margin-top: 4px; }
+  .filtered-row td { color: var(--muted-foreground); }
+  .review-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .review-bar .select { width: 150px; height: 30px; font-size: 13px; }
+  .diff-flag { font-size: 13px; font-variant-numeric: tabular-nums; }
+
+  .attr-summary { display: flex; flex-direction: column; }
+  .attr-row {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 12px 20px; border-bottom: 1px solid var(--border);
+  }
+  .attr-row:last-child { border-bottom: none; }
+  .attr-row .attr-name { min-width: 120px; }
+  .attr-row .attr-hint { font-size: 13px; color: var(--muted-foreground); flex: 1; min-width: 200px; line-height: 18px; }
+  .attr-row .attr-count { font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .attr-row .attr-count b { font-size: 15px; }
+  .attr-row .attr-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .attr-row.is-filtered { background: var(--primary-subtle); }
+  .attr-row.is-clear .attr-count { color: var(--success); }
+
+  .split-pane .pane-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .pane-answer { font-size: 14px; line-height: 22px; white-space: pre-wrap; word-break: break-word; }
+  .pane-answer.refusal { color: var(--muted-foreground); }
+
+  @media (max-width: 720px) {
+    .attr-row .attr-hint { flex-basis: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="sidebar-scrim" id="sidebar-scrim"></div>
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" id="menu-btn" aria-label="打开导航">☰</button>
+      <div class="crumb"><a href="eval.html">效果评测</a> / <b id="crumb-cur">运行详情</b></div>
+    </header>
+    <main class="content">
+      <div class="content-inner page-fill">
+        <div class="page-header">
+          <div style="min-width:0">
+            <a class="back-link" href="eval.html">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+              返回运行列表
+            </a>
+            <h1 id="page-title">运行详情</h1>
+            <div class="sub" id="page-sub"></div>
+          </div>
+          <div class="actions" id="header-actions"></div>
+        </div>
+
+        <div class="subnav" id="subnav"></div>
+
+        <div id="page-body"></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="ui.js"></script>
+<script src="data.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  const $ = (s, el) => (el || document).querySelector(s);
+
+  /* ---------- 通用工具 ---------- */
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  const SVG_ALERT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
+  const SVG_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+  const SVG_FILTER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v6l-4 2v-8Z"/></svg>';
+  const SVG_SERVER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01"/><path d="M6 18h.01"/></svg>';
+  const SVG_RUNS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3h8v4l4.5 9.2A3 3 0 0 1 17.8 21H6.2a3 3 0 0 1-2.7-4.8L8 7Z"/><path d="M7 3h10"/></svg>';
+
+  /* ---------- 常量（枚举 → 中文展示） ---------- */
+  const CATEGORY_LABEL = {
+    DIRECT: '直接问答', TERM_VARIATION: '术语变体', CONFUSABLE: '易混问题',
+    FOLLOW_UP: '追问', OUT_OF_KB: '资料外',
+  };
+  const REVIEW_TAGS = [null, 'OK', 'WRONG_ANSWER', 'MISSING_EVIDENCE', 'WRONG_SOURCE', 'OTHER'];
+  const SINGLE_METRICS = ['hitAt1', 'hitAt3', 'hitAt5', 'recallAt5', 'mrr', 'refusalAccuracy', 'p50Ms', 'p95Ms', 'maxMs'];
+  const COMPARE_METRICS = ['hitAt1', 'hitAt3', 'hitAt5', 'recallAt5', 'mrr', 'refusalAccuracy', 'p50Ms', 'p95Ms', 'maxMs', 'avgLatencyMs'];
+  const ATTR_KEYS = Object.keys(MockData.attributionMeta);
+
+  function catLabel(c) { return CATEGORY_LABEL[c] || c; }
+  function metricLabel(k) { const m = MockData.runMetricMeta[k]; return m ? m.label : k; }
+  function metricDesc(k) { const m = MockData.runMetricMeta[k]; return m ? m.desc : ''; }
+
+  /* ---------- 页面状态 ---------- */
+  const state = {
+    mode: 'single',      // single | compare
+    runId: null,
+    baseId: null,
+    expId: null,
+    pageState: 'normal', // normal | loading | error
+    attrFilter: 'all',   // all | <attrKey>
+    diffSort: 'severity',// severity | seq
+    openRows: new Set(),
+    page: 1,
+    pageSize: 10,
+  };
+
+  /* ---------- 小片段渲染 ---------- */
+  function stageRankChips(hit, cfg) {
+    const chips = MockUtil.stageRanks(hit, cfg.retrievalMode, cfg.rerankDegraded === true);
+    return '<div class="stage-ranks">' + chips.map((c, i) => {
+      const score = c.score == null ? '' : `<span class="sc">${esc(c.score)}</span>`;
+      const final = i === chips.length - 1 ? ' is-final' : '';
+      return `<span class="stage-rank${final}"><span class="stage">${esc(c.label)}</span><span class="rk">#${c.rank}</span>${score}</span>`;
+    }).join('') + '</div>';
+  }
+
+  function hitMark(item) {
+    if (!item.answerable) return '<span class="hitmark na">不适用</span>';
+    return item.hit ? '<span class="hitmark ok">命中</span>' : '<span class="hitmark no">未命中</span>';
+  }
+
+  function rankText(rank) {
+    if (rank == null) return '未召回';
+    return '#' + rank;
+  }
+
+  function attrBadge(key) {
+    if (!key) return '<span class="muted">—</span>';
+    const meta = MockUtil.attribution(key);
+    if (!meta) return esc(key);
+    return `<span class="attr-badge ${MockUtil.attrClass(key)}" title="${esc(meta.hint)}">${esc(meta.label)}</span>`;
+  }
+
+  function citationsHTML(item, cfg) {
+    if (!item.citations || !item.citations.length) {
+      return '<div class="section-hint">' + (item.refusal ? '拒答：按语义规则清空引用，低相关命中仅在「检索调试」页可见。' : '无引用。') + '</div>';
+    }
+    return '<ul class="evidence-list">' + item.citations.map((c) => {
+      const link = c.docId
+        ? `<a href="doc-detail.html?doc=${encodeURIComponent(c.docId)}&chunk=${encodeURIComponent(c.chunkId)}">查看分块</a>`
+        : '';
+      return `<li>${esc(c.docName)} · ${esc(c.titlePath)}${c.page ? ' · 第 ' + c.page + ' 页' : ''} · <span class="mono">${c.score.toFixed(3)}</span> ${link}</li>`;
+    }).join('') + '</ul>';
+  }
+
+  // 由 chunkId 反查所属文档 id（评测快照只存 chunkId，文档详情页需要 docId）
+  function docIdOfChunk(chunkId) {
+    if (!chunkId) return null;
+    const docs = MockData.documents;
+    for (const docId of Object.keys(docs)) {
+      if (MockUtil.chunksOf(docId).some((c) => c.id === chunkId)) return docId;
+    }
+    return null;
+  }
+
+  function evidenceHTML(item) {
+    if (!item.evidence || !item.evidence.length) return '<div class="section-hint">该题为资料外问题，无标准证据分块。</div>';
+    return '<ul class="evidence-list">' + item.evidence.map((e) => {
+      const cls = e.resolved ? 'hit-ok' : 'hit-miss';
+      const mark = e.resolved ? '已解析' : '锚点未解析';
+      const docId = docIdOfChunk(e.chunkId);
+      const link = docId
+        ? ` <a href="doc-detail.html?doc=${encodeURIComponent(docId)}&chunk=${encodeURIComponent(e.chunkId)}">查看分块</a>`
+        : '';
+      return `<li class="${cls}">${esc(e.docName)} · ${esc(e.titlePath)}${e.page ? ' · 第 ' + e.page + ' 页' : ''}<span class="muted">（${e.anchor} 锚点 · ${mark}）</span>${link}</li>`;
+    }).join('') + '</ul>';
+  }
+
+  function retrievedHTML(item, run) {
+    const cfg = run.config;
+    const rows = item.retrieved.map((h) => {
+      const ev = h.isEvidence ? ' <span class="badge badge-success">标准答案</span>' : '';
+      const passed = h.passedThreshold ? '' : ' <span class="badge badge-neutral">低于阈值</span>';
+      return `<tr>
+        <td class="num">${h.rank}</td>
+        <td><div class="cell-main">${esc(h.docName)}${ev}${passed}</div><div class="cell-sub">${esc(h.titlePath)}${h.page ? ' · 第 ' + h.page + ' 页' : ''}</div></td>
+        <td class="num">${h.score.toFixed(3)}</td>
+        <td>${stageRankChips(h, cfg)}</td>
+        <td>${h.rankChangedReason ? `<div class="reason-line">${esc(h.rankChangedReason)}</div>` : '<span class="muted">—</span>'}</td>
+      </tr>`;
+    }).join('');
+    const filtered = (item.filteredOut || []).map((f) => `<tr class="filtered-row">
+        <td class="num">已过滤</td>
+        <td><div class="cell-main">${esc(f.docName)} <span class="badge badge-neutral">被阈值卡掉</span></div><div class="cell-sub">${esc(f.titlePath)}${f.page ? ' · 第 ' + f.page + ' 页' : ''}</div></td>
+        <td class="num">${f.score.toFixed(3)}</td>
+        <td><span class="muted">未进入候选</span></td>
+        <td><div class="reason-line">${esc(f.reason)}</div></td>
+      </tr>`).join('');
+    return `<table class="table">
+      <thead><tr>
+        <th class="num" style="width:80px">最终排名</th>
+        <th>文档 / 标题路径</th>
+        <th class="num" style="width:90px">最终分</th>
+        <th style="width:330px">分阶段位次</th>
+        <th>位次变化原因</th>
+      </tr></thead>
+      <tbody>${rows}${filtered}</tbody></table>`;
+  }
+
+  function latencySplit(item) {
+    const parts = ['总 ' + (item.latencyMs == null ? '—' : item.latencyMs + ' ms')];
+    if (item.retrievalMs != null) parts.push('检索 ' + item.retrievalMs + ' ms');
+    if (item.generationMs != null) parts.push('生成 ' + item.generationMs + ' ms');
+    return parts.join(' · ');
+  }
+
+  function reviewSelectHTML(item, runId) {
+    return `<div class="review-bar">
+      <span class="section-hint">人工标注</span>
+      <select class="select" data-review="${esc(runId)}" data-seq="${item.seq}" aria-label="人工标注">
+        ${REVIEW_TAGS.map((t) => `<option value="${t || ''}" ${(item.reviewTag || '') === (t || '') ? 'selected' : ''}>${esc(MockUtil.reviewTagLabel(t))}</option>`).join('')}
+      </select>
+      <span class="section-hint">已是「未标记」时选择标注项即写入本页内存数据。</span>
+    </div>`;
+  }
+
+  /* =========================================================
+     单次模式渲染
+     ========================================================= */
+  function renderMetricBar(run) {
+    return '<div class="section">' +
+      '<div class="section-head">' +
+        '<h2>运行指标</h2>' +
+        '<span class="section-hint">' + (run.metrics ? '由逐题明细派生，与逐题表一致' : '运行完成后才产生指标') + '</span>' +
+        '<div class="spacer"></div>' +
+        '<button class="btn btn-outline btn-sm" id="btn-metric-help">指标说明</button>' +
+      '</div>' +
+      '<div class="metric-bar">' + SINGLE_METRICS.map((k) => {
+        const v = run.metrics ? run.metrics[k] : null;
+        const text = MockUtil.fmtMetric(k, v);
+        return `<div class="metric">
+          <span class="k">${esc(metricLabel(k))} <button class="help" type="button" title="${esc(metricDesc(k))}" aria-label="${esc(metricLabel(k))}释义">?</button></span>
+          <span class="v ${v == null ? 'dim' : ''}">${esc(text)}</span>
+        </div>`;
+      }).join('') + '</div>' +
+    '</div>';
+  }
+
+  function openMetricHelp() {
+    const rows = Object.keys(MockData.runMetricMeta).map((k) => {
+      const m = MockData.runMetricMeta[k];
+      return `<div class="attr-row"><span class="attr-name">${esc(m.label)}</span><span class="attr-hint">${esc(m.desc)}</span></div>`;
+    }).join('');
+    SupieUI.openModal({
+      title: '指标说明',
+      wide: true,
+      bodyHTML: '<div class="attr-summary" style="border:1px solid var(--border);border-radius:var(--radius)">' + rows + '</div>' +
+        '<div class="hint mt-16">比率类指标显示为百分比，耗时类显示为毫秒；缺少数据时显示「—」，不显示 0。</div>',
+      footerHTML: '<button class="btn btn-outline" data-close>关闭</button>',
+    });
+  }
+
+  function configKVHTML(run, otherRun) {
+    const cfg = run.config;
+    const degraded = cfg.rerankDegraded === true;
+    const differs = (key) => {
+      if (!otherRun) return false;
+      return JSON.stringify(otherRun.config[key]) !== JSON.stringify(cfg[key]);
+    };
+    const cls = (key) => (differs(key) ? 'differs' : '');
+    const item = (k, v, key) => `<dt>${esc(k)}</dt><dd class="${key ? cls(key) : ''}">${v}</dd>`;
+    return '<dl class="kv">' +
+      '<div class="kv-group">检索</div>' +
+      item('检索模式', esc(MockUtil.modeLabel(cfg.retrievalMode)), 'retrievalMode') +
+      item('向量通道 topK', cfg.vectorTopK == null ? '未启用' : String(cfg.vectorTopK), 'vectorTopK') +
+      item('BM25 通道 topK', cfg.bm25TopK == null ? '未启用' : String(cfg.bm25TopK), 'bm25TopK') +
+      item('RRF k', cfg.rrfK == null ? '未启用' : String(cfg.rrfK), 'rrfK') +
+      item('送入模型 topK', String(cfg.topK), 'topK') +
+      item('minScore', cfg.minScore.toFixed(2), 'minScore') +
+      '<div class="kv-group">重排</div>' +
+      item('是否启用重排', cfg.rerankEnabled ? '启用' : '未启用', 'rerankEnabled') +
+      item('重排模型', cfg.rerankModel ? esc(cfg.rerankModel) : '—', 'rerankModel') +
+      item('重排状态', degraded
+        ? `<span class="degraded-line">${SVG_ALERT}已降级、未重排</span><div class="section-hint">重排服务调用失败后按规则回退到融合顺序；本次结果无法代表开启重排时的效果。</div>`
+        : (cfg.rerankEnabled ? '正常' : '未启用')) +
+      '<div class="kv-group">向量化与分块</div>' +
+      item('embedding 模型', esc(cfg.embeddingModel), 'embeddingModel') +
+      item('向量维度', String(cfg.embeddingDimensions), 'embeddingDimensions') +
+      item('分块策略', esc(cfg.chunkStrategy), 'chunkStrategy') +
+      item('语料分块数', String(cfg.chunkCount), 'chunkCount') +
+    '</dl>';
+  }
+
+  function itemFilterFn() {
+    return (item) => state.attrFilter === 'all' || item.attribution === state.attrFilter;
+  }
+
+  function attrFilterOptions() {
+    return '<option value="all">全部题目</option>' +
+      ATTR_KEYS.map((k) => `<option value="${k}" ${state.attrFilter === k ? 'selected' : ''}>仅看「${esc(MockData.attributionMeta[k].label)}」</option>`).join('');
+  }
+
+  function renderSingle() {
+    const run = MockUtil.run(state.runId);
+    const items = MockUtil.runItems(run.id);
+    const running = run.status === 'RUNNING';
+    const failed = run.status === 'FAILED';
+
+    let html = '';
+
+    if (failed) {
+      html += `<div class="alert alert-error">${SVG_ALERT}<div>
+        <b>该次运行失败：</b>${esc(run.failureReason || '原因未知')}
+        <div class="section-hint mt-8">失败运行不产生指标与逐题明细；请修复后重新发起评测运行。</div>
+      </div></div>`;
+    }
+
+    if (running) {
+      html += `<div class="alert alert-info">${SVG_RUNS}<div>
+        <b>运行中，已处理 ${run.processedCount}/${run.itemCount} 题</b>
+        <div class="section-hint mt-8">指标需全部题目处理完成后计算，此处不显示 0 值占位。下方仅列出已完成题目的逐题明细。</div>
+      </div></div>`;
+    }
+
+    if (!running && !failed) {
+      html += renderMetricBar(run);
+      html += '<div class="section"><div class="section-head"><h2>正确答案排名分布</h2>' +
+        `<span class="section-hint">仅统计可回答题（共 ${run.metrics ? run.metrics.answerableCount : '—'} 题）</span></div>` +
+        '<div class="card-block">' + rankDistHTML(run) + '</div></div>';
+    }
+
+    html += '<div class="section"><div class="section-head"><h2>配置快照</h2>' +
+      '<span class="section-hint">本次运行使用的配置，运行后不可变</span></div>' +
+      '<div class="card-block">' + configKVHTML(run, null) + '</div>' +
+      (run.runNote ? `<div class="section-hint mt-8">${esc(run.runNote)}</div>` : '') +
+      '</div>';
+
+    html += renderSingleItems(run, items);
+
+    $('#page-body').innerHTML = html;
+    bindItemArea(run);
+    const help = $('#btn-metric-help');
+    if (help) help.addEventListener('click', openMetricHelp);
+  }
+
+  function rankDistHTML(run) {
+    if (!run.metrics) {
+      return '<div class="rank-dist-row"><span class="rd-hint">运行未完成，暂无排名分布。</span></div>';
+    }
+    const items = MockUtil.rankDistItems(run.metrics);
+    const chips = items.map((it) => {
+      const cls = it.muted ? ' rd-miss' : '';
+      return `<span class="rd-item${cls}"><span class="rd-label">${esc(it.label)}</span><span class="rd-count">${it.count}</span></span>`;
+    }).join('<span class="rd-sep">·</span>');
+    return '<div class="rank-dist">' + chips + '</div>' +
+      '<div class="section-hint mt-8">正确答案分块在本次运行中的最终位次；「未召回」表示该题标准证据未进入前 5。</div>';
+  }
+
+  function renderSingleItems(run, items) {
+    const list = items.filter(itemFilterFn());
+    const totalPages = Math.max(1, Math.ceil(list.length / state.pageSize));
+    if (state.page > totalPages) state.page = totalPages;
+    const pageList = list.slice((state.page - 1) * state.pageSize, state.page * state.pageSize);
+
+    let head = '<div class="section"><div class="section-head">' +
+      '<h2>逐题明细</h2>' +
+      `<span class="section-hint">${items.length} 题${state.attrFilter !== 'all' ? '，已按归因筛选出 ' + list.length + ' 题' : ''}</span>` +
+      '<div class="spacer"></div>' +
+      '<div class="filter-group"><label class="label" for="f-attr">归因筛选</label>' +
+      `<select class="select" id="f-attr">${attrFilterOptions()}</select></div>` +
+      '</div>';
+
+    if (!items.length) {
+      head += `<div class="empty-state">${SVG_RUNS}<div class="t">暂无逐题明细</div><div class="d">该运行尚未产生逐题结果。</div></div></div>`;
+      return head;
+    }
+    if (!list.length) {
+      head += `<div class="empty-state">${SVG_FILTER}<div class="t">当前归因筛选下没有题目</div><div class="d">本次运行没有标记为「${esc(MockData.attributionMeta[state.attrFilter].label)}」的题目。</div>
+        <button class="btn btn-outline" id="btn-clear-attr">清除筛选</button></div></div>`;
+      return head;
+    }
+
+    const rows = pageList.map((item) => {
+      const open = state.openRows.has(item.seq);
+      return `<tr class="items-row ${open ? 'row-open' : ''}" data-seq="${item.seq}">
+        <td class="num" style="width:60px"><span class="expand-caret">${open ? '▼' : '▶'}</span> ${item.seq}</td>
+        <td><div class="q-cell"><div class="q-body">
+          <div class="q-text">${esc(item.question)}</div>
+          <div class="q-tags"><span class="badge badge-neutral" title="${esc(item.category)}">${esc(catLabel(item.category))}</span>${item.refusal ? '<span class="badge badge-warning">已拒答</span>' : ''}${item.refusalError ? '<span class="badge badge-danger">拒答误判</span>' : ''}</div>
+        </div></div></td>
+        <td>${item.answerable ? '<span class="muted">可回答</span>' : '<span class="muted">资料外</span>'}</td>
+        <td>${hitMark(item)}</td>
+        <td class="num">${rankText(item.firstEvidenceRank)}</td>
+        <td class="num">${item.latencyMs == null ? '<span class="metric-none">—</span>' : item.latencyMs + ' ms'}</td>
+        <td>${attrBadge(item.attribution)}</td>
+        <td>${esc(MockUtil.reviewTagLabel(item.reviewTag))}${item.processed ? ' <span class="badge badge-success">已处理</span>' : ''}</td>
+        <td><div class="row-actions"><button class="btn btn-ghost btn-sm" data-toggle="${item.seq}">${open ? '收起' : '展开'}</button></div></td>
+      </tr>` + (open ? `<tr class="sub-row"><td colspan="9">${singleItemDetail(item, run)}</td></tr>` : '');
+    }).join('');
+
+    head += `<div class="table-wrap fill"><table class="table" id="items-table">
+        <thead><tr>
+          <th class="num">序</th><th>问题 / 类别</th><th>可达性</th><th>命中</th><th class="num">证据排名</th><th class="num">耗时</th><th>归因</th><th>人工标注</th><th style="text-align:right">操作</th>
+        </tr></thead>
+        <tbody>${rows}</tbody></table></div>
+      <div class="pagination" id="items-pagination"></div>
+      </div>`;
+    return head;
+  }
+
+  function singleItemDetail(item, run) {
+    return `<div class="sub-block">
+        <h4>本运行回答 <span class="tagline">${item.refusal ? '（按规则拒答）' : ''}</span></h4>
+        <div class="answer-block ${item.refusal ? 'refusal' : ''}">${esc(item.answer)}</div>
+        ${item.refusalError ? `<div class="alert alert-warning mt-8">${SVG_ALERT}<div><b>拒答误判：</b>${esc(item.refusalError)}</div></div>` : ''}
+      </div>
+      <div class="sub-block">
+        <h4>参考答案</h4>
+        <div class="answer-block">${esc(item.referenceAnswer)}</div>
+      </div>
+      <div class="split-pane mt-16">
+        <div class="pane">
+          <div class="pane-head"><span class="pane-title">引用来源</span></div>
+          ${citationsHTML(item, run.config)}
+          <div class="sub-block">
+            <h4>标准证据分块</h4>
+            ${evidenceHTML(item)}
+          </div>
+          <div class="sub-block">
+            <h4>耗时拆分 <span class="tagline">${esc(latencySplit(item))}</span></h4>
+            <div class="lat-split">检索阶段与生成阶段分别计入单题端到端耗时（${item.latencyMs == null ? '—' : item.latencyMs + ' ms'}）。</div>
+          </div>
+        </div>
+        <div class="pane">
+          <div class="pane-head"><span class="pane-title">检索命中与分阶段位次</span><span class="muted">${esc(MockUtil.modeLabel(run.config.retrievalMode))}${run.config.rerankDegraded ? ' · 已降级、未重排' : ''}</span></div>
+          ${retrievedHTML(item, run)}
+          <div class="sub-block">
+            <h4>人工标注</h4>
+            ${reviewSelectHTML(item, run.id)}
+            ${item.attributionNote ? `<div class="reason-line mt-8"><b>归因说明：</b>${esc(item.attributionNote)}</div>` : ''}
+            ${item.reviewNote ? `<div class="reason-line mt-8"><b>标注备注：</b>${esc(item.reviewNote)}</div>` : ''}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  /* =========================================================
+     对比模式渲染
+     ========================================================= */
+  function renderGuard(guard) {
+    if (!guard.comparable) {
+      return `<div class="guard-banner">${SVG_ALERT}<div class="gb-body">
+        <div class="gb-title">两次运行不可比：指标差异不能归因到检索配置</div>
+        <ul>${guard.differences.map((d) => `<li>${esc(d.field)}：基线 ${esc(String(d.base))} → 实验 ${esc(String(d.exp))}</li>`).join('')}</ul>
+        <div class="gb-note">以上差异会独立影响命中判定与指标口径，请先统一这些条件再解读变化。</div>
+      </div></div>`;
+    }
+    const title = guard.sameConfig ? '配置无差异' : '两次运行可比';
+    return `<div class="guard-banner ok">${SVG_CHECK}<div class="gb-body">
+      <div class="gb-title">${title}</div>
+      <div class="gb-note">${esc(guard.note)}</div>
+    </div></div>`;
+  }
+
+  function deltaHTML(k, baseVal, expVal) {
+    const d = MockUtil.metricDelta(k, baseVal, expVal);
+    if (!d) return '<span class="delta delta-flat">—</span>';
+    const cls = d.flat ? 'delta-flat' : (d.better ? 'delta-good' : 'delta-bad');
+    // 箭头表示数值升降方向（与带符号的数值一致）；颜色单独表示改善/变差。
+    // 耗时升高是变差，此时应为「▲ +1290 ms · 红」，而不是「▼ +1290 ms」。
+    const arrow = d.flat ? '–' : (d.raw > 0 ? '▲' : '▼');
+    return `<span class="delta ${cls}"><span class="arrow">${arrow}</span>${esc(d.text)}</span>`;
+  }
+
+  function renderCompareMetricBar(base, exp) {
+    return '<div class="section">' +
+      '<div class="section-head"><h2>指标变化</h2>' +
+        '<span class="section-hint">基线（较早的运行）→ 实验；耗时类指标下降为改善</span>' +
+        '<div class="spacer"></div>' +
+        '<button class="btn btn-outline btn-sm" id="btn-metric-help">指标说明</button>' +
+      '</div>' +
+      '<div class="metric-bar">' + COMPARE_METRICS.map((k) => {
+        const bv = base.metrics ? base.metrics[k] : null;
+        const ev = exp.metrics ? exp.metrics[k] : null;
+        return `<div class="metric">
+          <span class="k">${esc(metricLabel(k))} <button class="help" type="button" title="${esc(metricDesc(k))}" aria-label="${esc(metricLabel(k))}释义">?</button></span>
+          <span class="v ${ev == null ? 'dim' : ''}">${esc(MockUtil.fmtMetric(k, bv))} <span class="arrow-v">→</span> ${esc(MockUtil.fmtMetric(k, ev))}</span>
+          ${deltaHTML(k, bv, ev)}
+        </div>`;
+      }).join('') + '</div>' +
+      (base.metrics && exp.metrics ? '' : '<div class="section-hint mt-8">有一次运行的指标尚未产生，变化无法计算。</div>') +
+    '</div>';
+  }
+
+  function severityOf(row) {
+    const na = row.base.firstEvidenceRank == null ? 99 : row.base.firstEvidenceRank;
+    const nb = row.exp.firstEvidenceRank == null ? 99 : row.exp.firstEvidenceRank;
+    return nb - na; // > 0 变差，< 0 变好
+  }
+
+  function sortedDiffRows(diff) {
+    const rows = diff.rows.slice();
+    if (state.diffSort === 'seq') return rows.sort((a, b) => a.seq - b.seq);
+    const group = { worse: 0, better: 1, flat: 2 };
+    return rows.sort((a, b) => {
+      if (group[a.direction] !== group[b.direction]) return group[a.direction] - group[b.direction];
+      const sa = Math.abs(severityOf(a));
+      const sb = Math.abs(severityOf(b));
+      if (sa !== sb) return sb - sa;
+      return a.seq - b.seq;
+    });
+  }
+
+  function rankDeltaHTML(row) {
+    const rb = row.base.firstEvidenceRank;
+    const re = row.exp.firstEvidenceRank;
+    if (rb == null && re == null) return '<span class="delta delta-flat"><span class="arrow">–</span>均为未召回</span>';
+    if (rb == null) return '<span class="delta delta-good"><span class="arrow">▲</span>救回（未召回 → #' + re + '）</span>';
+    if (re == null) return '<span class="delta delta-bad"><span class="arrow">▼</span>丢失（#' + rb + ' → 未召回）</span>';
+    const d = re - rb;
+    if (d === 0) return '<span class="delta delta-flat"><span class="arrow">–</span>名次不变</span>';
+    const better = d < 0;
+    return `<span class="delta ${better ? 'delta-good' : 'delta-bad'}"><span class="arrow">${better ? '▲' : '▼'}</span>${better ? '前进' : '后退'} ${Math.abs(d)} 名</span>`;
+  }
+
+  function comparePane(item, run, label) {
+    if (!item) {
+      return `<div class="pane"><div class="pane-head"><span class="pane-title">${esc(label)}</span></div><div class="section-hint">该题在此运行中没有结果（运行未完成或题目不在数据集内）。</div></div>`;
+    }
+    return `<div class="pane">
+      <div class="pane-head">
+        <span class="pane-title">${esc(label)}</span>
+        <span class="badge badge-neutral">${esc(run.title)}</span>
+        <div class="spacer"></div>
+        ${hitMark(item)} <span class="lat-split">${rankText(item.firstEvidenceRank)} · ${item.latencyMs == null ? '—' : item.latencyMs + ' ms'}</span>
+      </div>
+      <div class="sub-block">
+        <h4>回答 <span class="tagline">${esc(latencySplit(item))}</span></h4>
+        <div class="pane-answer ${item.refusal ? 'refusal' : ''}">${esc(item.answer)}</div>
+      </div>
+      <div class="sub-block">
+        <h4>引用来源</h4>
+        ${citationsHTML(item, run.config)}
+      </div>
+      <div class="sub-block">
+        <h4>检索命中与分阶段位次 <span class="tagline">${esc(MockUtil.modeLabel(run.config.retrievalMode))}${run.config.rerankDegraded ? ' · 已降级、未重排' : ''}</span></h4>
+        ${retrievedHTML(item, run)}
+      </div>
+      <div class="sub-block">
+        <h4>标注</h4>
+        <div class="review-bar">
+          <span class="section-hint">归因</span> ${attrBadge(item.attribution)}
+          <span class="section-hint">人工标注</span> <span>${esc(MockUtil.reviewTagLabel(item.reviewTag))}</span>
+          ${item.processed ? '<span class="badge badge-success">已处理</span>' : '<span class="badge badge-neutral">未处理</span>'}
+          <div class="spacer"></div>
+          ${item.attribution ? `<button class="btn btn-outline btn-sm" data-mark="${esc(run.id)}" data-seq="${item.seq}">${item.processed ? '取消已处理' : '标记已处理'}</button>` : ''}
+        </div>
+        ${item.attributionNote ? `<div class="reason-line mt-8"><b>归因说明：</b>${esc(item.attributionNote)}</div>` : ''}
+        ${item.reviewNote ? `<div class="reason-line mt-8"><b>标注备注：</b>${esc(item.reviewNote)}</div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  function renderDiffRows(rows, base, exp) {
+    if (!rows.length) {
+      const noRows = MockUtil.diffRuns(base.id, exp.id).rows.length === 0;
+      const msg = noRows
+        ? `<div class="t">两次运行没有可逐题对比的题目</div>
+           <div class="d">至少有一次运行没有产生逐题明细（运行中或失败），因此无法按题号 1:1 关联。</div>`
+        : `<div class="t">当前筛选下没有可对比的题目</div>
+           <div class="d">没有符合该归因条件的题目，可清除筛选查看全部。</div>`;
+      return `<div class="empty-state">${SVG_FILTER}${msg}
+        ${noRows ? '<a class="btn btn-outline" href="eval.html">返回运行列表</a>' : '<button class="btn btn-outline" id="btn-clear-attr">清除筛选</button>'}
+      </div>`;
+    }
+    const totalPages = Math.max(1, Math.ceil(rows.length / state.pageSize));
+    if (state.page > totalPages) state.page = totalPages;
+    const pageRows = rows.slice((state.page - 1) * state.pageSize, state.page * state.pageSize);
+    const body = pageRows.map((row) => {
+      const open = state.openRows.has(row.seq);
+      return `<tr class="items-row ${open ? 'row-open' : ''}" data-seq="${row.seq}">
+        <td class="num" style="width:56px"><span class="expand-caret">${open ? '▼' : '▶'}</span> ${row.seq}</td>
+        <td><div class="q-cell"><div class="q-body">
+          <div class="q-text">${esc(row.question)}</div>
+          <div class="q-tags"><span class="badge badge-neutral" title="${esc(row.category)}">${esc(catLabel(row.category))}</span></div>
+        </div></div></td>
+        <td>${attrBadge(row.exp.attribution)}</td>
+        <td>${hitMark(row.base)}</td>
+        <td class="num">${rankText(row.base.firstEvidenceRank)}</td>
+        <td class="num">${row.base.latencyMs == null ? '<span class="metric-none">—</span>' : row.base.latencyMs + ' ms'}</td>
+        <td>${hitMark(row.exp)}</td>
+        <td class="num">${rankText(row.exp.firstEvidenceRank)}</td>
+        <td class="num">${row.exp.latencyMs == null ? '<span class="metric-none">—</span>' : row.exp.latencyMs + ' ms'}</td>
+        <td>${rankDeltaHTML(row)}</td>
+        <td><div class="row-actions"><button class="btn btn-ghost btn-sm" data-toggle="${row.seq}">${open ? '收起' : '展开'}</button></div></td>
+      </tr>` + (open ? `<tr class="sub-row"><td colspan="11">${compareDetail(row, base, exp)}</td></tr>` : '');
+    }).join('');
+
+    return `<div class="table-wrap fill"><table class="table" id="diff-table">
+        <thead><tr>
+          <th class="num">序</th><th>问题 / 类别</th><th>归因</th>
+          <th>基线命中</th><th class="num">基线排名</th><th class="num">基线耗时</th>
+          <th>实验命中</th><th class="num">实验排名</th><th class="num">实验耗时</th>
+          <th>排名变化</th><th style="text-align:right">操作</th>
+        </tr></thead>
+        <tbody>${body}</tbody></table></div>
+      <div class="pagination" id="items-pagination"></div>`;
+  }
+
+  function compareDetail(row, base, exp) {
+    const changeLine = rankDeltaHTML(row);
+    const reasons = []
+      .concat((row.base.retrieved || []).map((h) => (h.isEvidence && h.rankChangedReason ? '基线：' + h.rankChangedReason : null)))
+      .concat((row.exp.retrieved || []).map((h) => (h.isEvidence && h.rankChangedReason ? '实验：' + h.rankChangedReason : null)))
+      .filter(Boolean);
+    return `<div class="sub-block">
+        <h4>位次变化 <span class="tagline">基线 #${row.base.firstEvidenceRank == null ? '未召回' : row.base.firstEvidenceRank} → 实验 #${row.exp.firstEvidenceRank == null ? '未召回' : row.exp.firstEvidenceRank}</span></h4>
+        <div>${changeLine}</div>
+        ${reasons.length ? '<div class="reason-line mt-8">' + reasons.map(esc).join('<br>') + '</div>' : ''}
+        ${row.exp.attributionNote ? `<div class="reason-line mt-8"><b>实验运行归因：</b>${esc(row.exp.attributionNote)}</div>` : ''}
+      </div>
+      <div class="split-pane mt-16">
+        ${comparePane(row.base, base, '基线运行')}
+        ${comparePane(row.exp, exp, '实验运行')}
+      </div>`;
+  }
+
+  function renderAttributionSummary(exp, processed) {
+    const summary = MockUtil.attributionSummary(exp.id);
+    const totalAttrs = ATTR_KEYS.reduce((s, k) => s + summary[k].count, 0);
+    const totalProcessed = ATTR_KEYS.reduce((s, k) => s + summary[k].processed, 0);
+    const allDone = totalAttrs > 0 && totalProcessed === totalAttrs;
+
+    let html = '<div class="section"><div class="section-head">' +
+      '<h2>归因汇总</h2>' +
+      `<span class="section-hint">实验运行「${esc(exp.title)}」中被归因的题目；共 ${totalAttrs} 题，已处理 ${totalProcessed} 题</span>` +
+      '<div class="spacer"></div>' +
+      '<button class="btn btn-outline btn-sm" id="btn-mark-all">全部标记已处理</button>' +
+      '</div>';
+
+    if (allDone) {
+      html += `<div class="guard-banner ok">${SVG_CHECK}<div class="gb-body"><div class="gb-title">全部已处理</div>
+        <div class="gb-note">本次运行的 ${totalAttrs} 道归因题目均已标记处理，可据此关闭该轮排查。</div></div></div>`;
+    }
+
+    html += '<div class="card-block" style="padding:0"><div class="attr-summary">' +
+      ATTR_KEYS.map((k) => {
+        const meta = MockData.attributionMeta[k];
+        const c = summary[k];
+        const clear = c.count > 0 && c.processed === c.count;
+        return `<div class="attr-row ${state.attrFilter === k ? 'is-filtered' : ''} ${clear ? 'is-clear' : ''}">
+          <span class="attr-name">${attrBadge(k)}</span>
+          <span class="attr-hint">${esc(meta.hint)}</span>
+          <span class="attr-count"><b>${c.count}</b> 题 · 已处理 ${c.processed}</span>
+          <span class="attr-actions">
+            <button class="btn btn-outline btn-sm" data-filter="${k}" ${c.count === 0 ? 'disabled' : ''}>${state.attrFilter === k ? '取消筛选' : '筛选'}</button>
+            <button class="btn btn-outline btn-sm" data-mark-attr="${k}" ${c.count === 0 || clear ? 'disabled' : ''}>标记已处理</button>
+          </span>
+        </div>`;
+      }).join('') +
+    '</div></div></div>';
+    return html;
+  }
+
+  function degradedNotice(base, exp) {
+    const degraded = [['基线', base], ['实验', exp]].filter(([, r]) => r.config.rerankDegraded === true);
+    if (!degraded.length) return '';
+    const names = degraded.map(([label, r]) => `${label}「${r.title}」`).join('、');
+    return `<div class="alert alert-warning">${SVG_ALERT}<div>
+      <b>${esc(names)} 已降级、未重排</b>
+      <div class="section-hint mt-8">该次运行的重排服务调用失败后按规则回退到融合顺序，其结果不能与正常开启重排的运行混为可比结论，请勿把指标差异直接归因到「是否开启重排」。</div>
+    </div></div>`;
+  }
+
+  function renderCompare() {
+    const base = MockUtil.run(state.baseId);
+    const exp = MockUtil.run(state.expId);
+    const guard = MockUtil.compareGuard(base.id, exp.id);
+    const diff = MockUtil.diffRuns(base.id, exp.id);
+    const sorted = sortedDiffRows(diff);
+    const filtered = sorted.filter((row) => state.attrFilter === 'all' || row.exp.attribution === state.attrFilter);
+
+    let html = '';
+    html += renderGuard(guard);
+    html += degradedNotice(base, exp);
+    html += renderCompareMetricBar(base, exp);
+
+    html += '<div class="section"><div class="section-head"><h2>逐题变化</h2>' +
+      '<span class="section-hint">两次运行按题号 1:1 关联，共 ' + diff.rows.length + ' 题可比</span></div>' +
+      `<div class="count-summary">
+        <span class="better">变好 <b>${diff.better}</b> 题</span>
+        <span class="worse">变差 <b>${diff.worse}</b> 题</span>
+        <span class="flat">不变 <b>${diff.flat}</b> 题</span>
+      </div></div>`;
+
+    html += '<div class="section"><div class="section-head">' +
+      '<h2>逐题对比</h2>' +
+      `<span class="section-hint">默认按退化程度排序，先看最严重的退步${degradedConfigHint(base, exp)}</span>` +
+      '<div class="spacer"></div>' +
+      '<div class="filter-group"><label class="label" for="f-sort">排序</label>' +
+        `<select class="select" id="f-sort"><option value="severity" ${state.diffSort === 'severity' ? 'selected' : ''}>退化程度优先</option><option value="seq" ${state.diffSort === 'seq' ? 'selected' : ''}>按题号</option></select></div>` +
+      '<div class="filter-group"><label class="label" for="f-attr">归因筛选</label>' +
+        `<select class="select" id="f-attr">${attrFilterOptions()}</select></div>` +
+      '</div>' +
+      renderDiffRows(filtered, base, exp) +
+      '</div>';
+
+    html += renderAttributionSummary(exp);
+
+    $('#page-body').innerHTML = html;
+    const help = $('#btn-metric-help');
+    if (help) help.addEventListener('click', openMetricHelp);
+  }
+
+  function degradedConfigHint(base, exp) {
+    const names = [base, exp].filter((r) => r.config.rerankDegraded === true).map((r) => r.title);
+    return names.length ? '；标注「已降级、未重排」：' + esc(names.join('、')) : '';
+  }
+
+  /* =========================================================
+     骨架 / 错误态
+     ========================================================= */
+  function skeletonHTML() {
+    return `<div class="skeleton skeleton-line mb-24" style="width:320px; height:48px"></div>
+      <div class="skeleton skeleton-line mb-24" style="width:100%; height:64px"></div>
+      <div class="skeleton skeleton-line mb-24" style="width:100%; height:120px"></div>
+      <div class="skeleton-block"><div class="skeleton skeleton-line" style="width:40%"></div><div class="skeleton skeleton-line" style="width:78%"></div><div class="skeleton skeleton-line" style="width:62%"></div></div>`;
+  }
+
+  function errorHTML(msg, detail) {
+    return `<div class="error-state">${SVG_SERVER}
+      <div class="t">${esc(msg)}</div>
+      <div class="d">${esc(detail)}</div>
+      <a class="btn btn-outline" href="eval.html">返回运行列表</a>
+    </div>`;
+  }
+
+  /* =========================================================
+     事件绑定
+     ========================================================= */
+  function bindItemArea(run) {
+    document.querySelectorAll('[data-toggle]').forEach((b) => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleRow(parseInt(b.dataset.toggle, 10));
+      });
+    });
+    document.querySelectorAll('#items-table .items-row').forEach((tr) => {
+      tr.addEventListener('click', (e) => {
+        if (e.target.closest('a, button, select, input')) return;
+        toggleRow(parseInt(tr.dataset.seq, 10));
+      });
+    });
+    const fa = $('#f-attr');
+    if (fa) fa.addEventListener('change', (e) => {
+      state.attrFilter = e.target.value;
+      state.openRows.clear();
+      state.page = 1;
+      render();
+    });
+    const clr = $('#btn-clear-attr');
+    if (clr) clr.addEventListener('click', () => { state.attrFilter = 'all'; state.openRows.clear(); state.page = 1; render(); });
+
+    document.querySelectorAll('[data-review]').forEach((sel) => {
+      sel.addEventListener('change', () => {
+        const rid = sel.dataset.review;
+        const seq = parseInt(sel.dataset.seq, 10);
+        const item = MockUtil.runItems(rid).find((i) => i.seq === seq);
+        if (!item) return;
+        item.reviewTag = sel.value || null;
+        if (item.reviewTag && !item.reviewNote) item.reviewNote = '原型内标注（未提交后端）。';
+        SupieUI.toast('第 ' + seq + ' 题的标注已更新为「' + MockUtil.reviewTagLabel(item.reviewTag) + '」', 'success');
+      });
+    });
+
+    const pg = $('#items-pagination');
+    if (pg) {
+      const list = MockUtil.runItems(run.id).filter(itemFilterFn());
+      SupieUI.renderPagination(pg, {
+        total: list.length,
+        page: state.page,
+        pageSize: state.pageSize,
+        onPage: (p) => { state.page = p; render(); },
+        onPageSize: (s) => { state.pageSize = s; state.page = 1; render(); },
+      });
+    }
+  }
+
+  function bindCompareArea(base, exp) {
+    document.querySelectorAll('[data-toggle]').forEach((b) => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleRow(parseInt(b.dataset.toggle, 10));
+      });
+    });
+    document.querySelectorAll('#diff-table .items-row').forEach((tr) => {
+      tr.addEventListener('click', (e) => {
+        if (e.target.closest('a, button, select, input')) return;
+        toggleRow(parseInt(tr.dataset.seq, 10));
+      });
+    });
+    const fs = $('#f-sort');
+    if (fs) fs.addEventListener('change', (e) => { state.diffSort = e.target.value; state.openRows.clear(); state.page = 1; render(); });
+    const fa = $('#f-attr');
+    if (fa) fa.addEventListener('change', (e) => { state.attrFilter = e.target.value; state.openRows.clear(); state.page = 1; render(); });
+    const clr = $('#btn-clear-attr');
+    if (clr) clr.addEventListener('click', () => { state.attrFilter = 'all'; state.openRows.clear(); state.page = 1; render(); });
+
+    const pg = $('#items-pagination');
+    if (pg) {
+      const rows = sortedDiffRows(MockUtil.diffRuns(base.id, exp.id))
+        .filter((row) => state.attrFilter === 'all' || row.exp.attribution === state.attrFilter);
+      if (rows.length) {
+        SupieUI.renderPagination(pg, {
+          total: rows.length,
+          page: state.page,
+          pageSize: state.pageSize,
+          onPage: (p) => { state.page = p; state.openRows.clear(); render(); },
+          onPageSize: (s) => { state.pageSize = s; state.page = 1; state.openRows.clear(); render(); },
+        });
+      }
+    }
+
+    document.querySelectorAll('[data-filter]').forEach((b) => {
+      b.addEventListener('click', () => {
+        state.attrFilter = state.attrFilter === b.dataset.filter ? 'all' : b.dataset.filter;
+        state.openRows.clear();
+        state.page = 1;
+        render();
+      });
+    });
+    document.querySelectorAll('[data-mark-attr]').forEach((b) => {
+      b.addEventListener('click', () => markAttribution(exp.id, b.dataset.markAttr));
+    });
+    const all = $('#btn-mark-all');
+    if (all) all.addEventListener('click', () => markAttribution(exp.id, null));
+    document.querySelectorAll('[data-mark]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const item = MockUtil.runItems(b.dataset.mark).find((i) => i.seq === parseInt(b.dataset.seq, 10));
+        if (!item) return;
+        item.processed = !item.processed;
+        SupieUI.toast('第 ' + item.seq + ' 题已' + (item.processed ? '标记为已处理' : '取消已处理'), 'success');
+        render();
+      });
+    });
+  }
+
+  function markAttribution(runId, attrKey) {
+    let n = 0;
+    MockUtil.runItems(runId).forEach((i) => {
+      if (!i.attribution) return;
+      if (attrKey && i.attribution !== attrKey) return;
+      if (!i.processed) { i.processed = true; n++; }
+    });
+    if (n === 0) { SupieUI.toast('没有需要标记的题目', 'default'); return; }
+    const label = attrKey ? MockData.attributionMeta[attrKey].label : '全部归因';
+    SupieUI.toast('已将「' + label + '」的 ' + n + ' 道题标记为已处理', 'success');
+    render();
+  }
+
+  function toggleRow(seq) {
+    if (state.openRows.has(seq)) state.openRows.delete(seq);
+    else state.openRows.add(seq);
+    render();
+  }
+
+  /* =========================================================
+     选择第二次运行（单次模式下进入对比）
+     ========================================================= */
+  function openComparePicker() {
+    const run = MockUtil.run(state.runId);
+    const others = MockData.evalRuns.filter((r) => r.id !== run.id);
+    if (!others.length) { SupieUI.toast('没有其他运行可供对比', 'error'); return; }
+    const opts = others.map((r) => {
+      const st = MockUtil.runStatusMeta(r.status);
+      const disabled = r.metrics ? '' : ' disabled';
+      return `<option value="${esc(r.id)}"${disabled}>${esc(r.createdAt)} · ${esc(r.title)} · ${esc(r.datasetName)} v${r.datasetVersionNo} · ${esc(st.label)}${r.metrics ? '' : '（无指标）'}</option>`;
+    }).join('');
+    const m = SupieUI.openModal({
+      title: '与另一次运行对比',
+      bodyHTML:
+        '<div class="field">' +
+          '<label class="label" for="cmp-run">选择对比运行 <span class="req">*</span></label>' +
+          `<select class="select" id="cmp-run">${opts}</select>` +
+          '<div class="hint">基线为创建时间较早的运行，实验为较晚的运行。数据集版本不一致时页面会给出不可比提示。</div>' +
+        '</div>',
+      footerHTML: '<button class="btn btn-outline" data-cancel>取消</button>' +
+        '<button class="btn btn-primary" data-ok>进入对比</button>',
+    });
+    m.overlay.querySelector('[data-cancel]').addEventListener('click', m.close);
+    m.overlay.querySelector('[data-ok]').addEventListener('click', () => {
+      const id = m.overlay.querySelector('#cmp-run').value;
+      const other = MockUtil.run(id);
+      if (!other) return;
+      const pair = [run, other].sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+      location.href = 'eval-run.html?base=' + encodeURIComponent(pair[0].id) + '&exp=' + encodeURIComponent(pair[1].id);
+    });
+  }
+
+  /* =========================================================
+     页面装配
+     ========================================================= */
+  function renderHeader() {
+    const subnav = $('#subnav');
+    const actions = $('#header-actions');
+    const sub = $('#page-sub');
+
+    if (state.mode === 'single') {
+      const run = MockUtil.run(state.runId);
+      $('#crumb-cur').textContent = run.title;
+      $('#page-title').textContent = run.title;
+      sub.textContent = `${run.datasetName} v${run.datasetVersionNo} · ${run.kbName} · ${MockUtil.modeShort(run.config.retrievalMode)} · 创建于 ${run.createdAt}${run.finishedAt ? ' · 完成于 ' + run.finishedAt : ''}`;
+      subnav.innerHTML = '<a href="#" class="active" data-mode="single">运行详情</a><a href="#" data-mode="compare">对比</a>';
+      actions.innerHTML = '<button class="btn btn-primary" id="btn-pick">与另一次运行对比</button>';
+      actions.querySelector('#btn-pick').addEventListener('click', openComparePicker);
+      subnav.querySelectorAll('a').forEach((a) => a.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (a.dataset.mode === 'compare') openComparePicker();
+      }));
+    } else {
+      const base = MockUtil.run(state.baseId);
+      const exp = MockUtil.run(state.expId);
+      $('#crumb-cur').textContent = '运行对比';
+      $('#page-title').textContent = '运行对比';
+      sub.textContent = `基线 ${base.title}（${base.createdAt}） → 实验 ${exp.title}（${exp.createdAt}） · ${exp.datasetName} v${exp.datasetVersionNo}`;
+      subnav.innerHTML = `<a href="eval-run.html?run=${encodeURIComponent(base.id)}">运行详情</a><a href="#" class="active" data-mode="compare">对比</a>`;
+      actions.innerHTML = '<a class="btn btn-outline" href="eval-run.html?run=' + encodeURIComponent(exp.id) + '">退出对比</a>';
+    }
+  }
+
+  function render() {
+    if (state.pageState === 'loading') {
+      $('#subnav').hidden = false;
+      $('#page-body').innerHTML = skeletonHTML();
+      return;
+    }
+    if (state.pageState === 'error') {
+      $('#page-body').innerHTML = errorHTML('运行记录加载失败', '无法获取这次运行的数据，请重试。');
+      return;
+    }
+    if (state.mode === 'single') {
+      renderHeader();
+      renderSingle();
+    } else {
+      const base = MockUtil.run(state.baseId);
+      const exp = MockUtil.run(state.expId);
+      renderHeader();
+      renderCompare();
+      bindCompareArea(base, exp);
+    }
+  }
+
+  function fatal(msg, detail) {
+    $('#page-title').textContent = '运行对比';
+    $('#subnav').hidden = true;
+    $('#crumb-cur').textContent = '错误';
+    $('#page-body').innerHTML = errorHTML(msg, detail);
+  }
+
+  /* =========================================================
+     初始化
+     ========================================================= */
+  function init() {
+    SupieUI.initShell('eval');
+    const params = new URLSearchParams(location.search);
+    const runId = params.get('run');
+    const baseId = params.get('base');
+    const expId = params.get('exp');
+
+    SupieUI.initProtoTools([
+      {
+        label: '页面状态',
+        control: {
+          type: 'select',
+          options: ['正常', '首屏加载', '加载失败'],
+          value: '正常',
+          onChange: (v) => {
+            state.pageState = v === '正常' ? 'normal' : (v === '首屏加载' ? 'loading' : 'error');
+            render();
+          },
+        },
+      },
+      {
+        label: '归因处理',
+        control: {
+          type: 'button',
+          text: '本运行全部标记已处理',
+          onClick: () => {
+            const target = state.mode === 'compare' ? state.expId : state.runId;
+            if (!target) { SupieUI.toast('当前没有可操作的运行', 'error'); return; }
+            markAttribution(target, null);
+          },
+        },
+      },
+      {
+        label: '筛选',
+        control: {
+          type: 'button',
+          text: '清除归因筛选',
+          onClick: () => { state.attrFilter = 'all'; state.openRows.clear(); render(); },
+        },
+      },
+    ]);
+
+    if (baseId || expId) {
+      if (!baseId || !expId) { fatal('对比参数不完整', '对比需要同时提供 base 与 exp 两个运行 id。'); return; }
+      if (!MockUtil.run(baseId) || !MockUtil.run(expId)) { fatal('未找到对比运行', '链接中的运行不存在或已被删除。'); return; }
+      if (baseId === expId) { fatal('不能对比同一次运行', '请选择两次不同的运行。'); return; }
+      // 统一为「基线为较早的运行」
+      const b = MockUtil.run(baseId);
+      const e = MockUtil.run(expId);
+      const pair = [b, e].sort((x, y) => (x.createdAt < y.createdAt ? -1 : 1));
+      state.mode = 'compare';
+      state.baseId = pair[0].id;
+      state.expId = pair[1].id;
+    } else if (runId) {
+      if (!MockUtil.run(runId)) { fatal('未找到该评测运行', '链接可能已过期，或该运行已被删除。'); return; }
+      state.mode = 'single';
+      state.runId = runId;
+    } else {
+      fatal('缺少运行参数', '请从运行列表进入详情，或提供 base 与 exp 参数进行对比。');
+      return;
+    }
+
+    render();
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

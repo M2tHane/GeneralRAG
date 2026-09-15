@@ -1,0 +1,88 @@
+{
+  "_comment": "评测调优集 v1（TUNING）。字段与 contracts/openapi.yaml EvalDatasetItem 一致。导入方式：POST /api/v1/eval/datasets (multipart, name=调优集-v1, datasetType=TUNING, file=本文件)。evidence.docName 必须与上传到知识库的文档名一致。",
+  "items": [
+    {
+      "question": "Elasticsearch 集群处于 yellow 状态说明什么？",
+      "referenceAnswer": "所有主分片已分配，但存在未分配的副本分片。若某个节点故障，部分数据在修复前可能不可用；与 red（主分片未分配、部分数据不可用）不同。",
+      "evidence": [
+        {
+          "docName": "elasticsearch-cluster-health.md",
+          "titlePath": "Elasticsearch 集群健康与磁盘水位 > 1. 集群健康状态",
+          "page": null,
+          "snippet": "yellow：所有主分片已分配，但存在未分配的副本分片。若集群中某个节点故障，部分数据在修复前可能不可用。"
+        }
+      ],
+      "answerable": true,
+      "category": "DIRECT"
+    },
+    {
+      "question": "Redis 里那个追加日志式的持久化方式，有哪三种刷盘策略？默认是哪种？",
+      "referenceAnswer": "指 AOF（Append Only File）。三种 fsync 策略：appendfsync always（每条命令都刷盘，最慢最安全）、appendfsync everysec（每秒刷盘，最多丢 1 秒数据）、appendfsync no（从不主动刷盘，交给操作系统，Linux 一般 30 秒刷一次）。默认且建议策略是 everysec。",
+      "evidence": [
+        {
+          "docName": "redis-persistence.md",
+          "titlePath": "Redis 持久化 > 3. AOF 的优缺点与刷盘策略 > 三种 fsync 策略（appendfsync）",
+          "page": null,
+          "snippet": "appendfsync everysec：每秒 fsync。……建议且默认策略。"
+        }
+      ],
+      "answerable": true,
+      "category": "TERM_VARIATION"
+    },
+    {
+      "question": "Kafka 一个消费者组里的消费者数量超过分区数量会怎么样？",
+      "referenceAnswer": "组内一个分区只能被一个消费者消费，超出的消费者会分配不到任何分区而空闲空跑。消费者数最好与分区数成整除关系。",
+      "evidence": [
+        {
+          "docName": "kafka-consumer-groups.md",
+          "titlePath": "Kafka 消费者组与消息积压 > 1. 消费者组的核心规则",
+          "page": null,
+          "snippet": "组内消费者数不能超过订阅主题的分区数：超出的消费者会分配不到任何分区而空闲空跑。"
+        }
+      ],
+      "answerable": true,
+      "category": "DIRECT"
+    },
+    {
+      "question": "nginx 里 proxy_buffer_size 和 proxy_buffers 两个配置有什么区别？",
+      "referenceAnswer": "proxy_buffer_size 是读取被代理响应第一部分（通常包含响应头）的缓冲区大小，默认 4k|8k，响应头超过该大小会被判为 invalid_header；proxy_buffers 设置读取后端响应的缓冲区的数量和大小（默认 8 4k|8k），针对单个连接。前者管响应头，后者管响应体的缓冲区数量与大小。",
+      "evidence": [
+        {
+          "docName": "nginx-proxy-buffering.md",
+          "titlePath": "Nginx 反向代理缓冲 > 2. 相关指令",
+          "page": null,
+          "snippet": "proxy_buffer_size……读取被代理响应第一部分的缓冲区……proxy_buffers number size……缓冲区的数量和大小（针对单个连接）。"
+        }
+      ],
+      "answerable": true,
+      "category": "CONFUSABLE"
+    },
+    {
+      "question": "ES 磁盘用量超过了 flood_stage 水位之后会怎样？怎么恢复写入？",
+      "referenceAnswer": "超过 flood_stage（默认 95%）后，节点上的索引被加上 index.blocks.read_only_allow_delete 块，拒绝写入、仅允许删除。磁盘清理后只读块不会自动解除：需对索引执行 PUT /<索引名>/_settings { \"index.blocks.read_only_allow_delete\": null } 手动恢复，并对之前分配失败的分片执行 POST _cluster/reroute?retry_failed=true。",
+      "evidence": [
+        {
+          "docName": "elasticsearch-cluster-health.md",
+          "titlePath": "Elasticsearch 集群健康与磁盘水位 > 2. 磁盘水位三阶段",
+          "page": null,
+          "snippet": "超过 flood_stage（95%）：节点上的索引被加上 index.blocks.read_only_allow_delete 块，拒绝写入（仅允许删除）"
+        },
+        {
+          "docName": "elasticsearch-cluster-health.md",
+          "titlePath": "Elasticsearch 集群健康与磁盘水位 > 3. 磁盘超限的处理步骤",
+          "page": null,
+          "snippet": "磁盘恢复后，flood_stage 加上的只读块不会自动解除，必须手动恢复"
+        }
+      ],
+      "answerable": true,
+      "category": "DIRECT"
+    },
+    {
+      "question": "怎么用 Git rebase 整理提交历史？",
+      "referenceAnswer": null,
+      "evidence": [],
+      "answerable": false,
+      "category": "OUT_OF_KB"
+    }
+  ]
+}

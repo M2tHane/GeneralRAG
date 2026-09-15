@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>检索调试 · 通用知识问答 RAG</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  /* ---------- 页面私有样式（检索调试） ---------- */
+  .q-section { margin-bottom: 24px; }
+  .query-row { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+  .q-group { display: flex; flex-direction: column; gap: 6px; }
+  .q-group.grow { flex: 1; min-width: 260px; }
+  .q-group .select { width: 220px; }
+  .run-btn { margin-top: 26px; }
+  .sample-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+  .q-chip {
+    border: 1px solid var(--border); background: var(--surface); color: var(--foreground);
+    font-size: 13px; font-family: inherit; padding: 3px 12px; border-radius: 999px; cursor: pointer;
+    transition: border-color .15s, background .15s; display: inline-flex; align-items: center;
+  }
+  .q-chip:hover { border-color: var(--primary); background: var(--primary-subtle); }
+  .q-chip .chip-tag {
+    margin-left: 6px; font-size: 13px; color: var(--muted-foreground);
+    border-left: 1px solid var(--border); padding-left: 6px;
+  }
+  #kb-empty-notice { margin-top: 12px; margin-bottom: 0; }
+
+  .cfg { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 14px 16px 16px; margin-bottom: 24px; }
+  .cfg-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .cfg h2, .rs h2 { font-size: 16px; font-weight: 600; margin: 0; }
+  .cfg-hint { font-size: 13px; color: var(--muted-foreground); }
+  .cfg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px 24px; }
+  .cfg-item { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .cfg-k { font-size: 13px; color: var(--muted-foreground); }
+  .cfg-v { font-size: 14px; font-variant-numeric: tabular-nums; word-break: break-all; }
+
+  .rs { margin-bottom: 24px; }
+  .rs-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+  .rs-meta { font-size: 13px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+  .rs-grid { display: grid; grid-template-columns: 300px 1fr; gap: 24px; align-items: start; }
+
+  .hits-table { min-width: 860px; }
+  .row-filtered td { opacity: 0.55; }
+  .row-filtered .badge { opacity: 1; }
+  .score-cell .badge { margin-top: 4px; }
+  .th-page, .td-page { white-space: nowrap; }
+  .sum { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 20px; }
+  .note-line { color: var(--warning); }
+  .filtered-details { margin-top: 12px; }
+  .filtered-details summary { font-size: 14px; color: var(--muted-foreground); cursor: pointer; }
+  .filtered-details summary:hover { color: var(--foreground); }
+
+  .tg-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+  .tg-item:last-child { border-bottom: none; }
+  .tg-k { font-size: 13px; color: var(--muted-foreground); }
+  .tg-v { font-size: 14px; font-variant-numeric: tabular-nums; font-weight: 500; }
+  .ctx { margin: 0; padding: 14px 16px; font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace; font-size: 13px; line-height: 20px; white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow-y: auto; }
+  .stage-running { display: flex; align-items: center; gap: 8px; color: var(--muted-foreground); font-size: 13px; margin-bottom: 12px; }
+
+  .skeleton-block { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 24px; display: flex; flex-direction: column; gap: 12px; }
+
+  /* ---------- 第二轮：检索通道开关（顶部，与生效配置只读带同一层级） ---------- */
+  .mode-bar { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 14px 16px; margin-bottom: 24px; }
+  .mode-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .mode-head h2 { font-size: 16px; font-weight: 600; margin: 0; }
+  .mode-hint { font-size: 13px; color: var(--muted-foreground); }
+  .ch-row { display: flex; flex-wrap: wrap; gap: 16px 32px; align-items: flex-start; }
+  .ch-item { display: flex; flex-direction: column; gap: 4px; }
+  .sw { display: inline-flex; align-items: center; gap: 8px; border: none; background: none; padding: 0; cursor: pointer; font-family: inherit; font-size: 14px; color: var(--foreground); }
+  .sw-track { width: 34px; height: 20px; border-radius: 999px; background: var(--input); position: relative; transition: background .15s; flex: none; }
+  .sw-knob { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgba(15, 23, 42, .25); transition: transform .15s; }
+  .sw[aria-checked="true"] .sw-track { background: var(--primary); }
+  .sw[aria-checked="true"] .sw-knob { transform: translateX(14px); }
+  .sw-state { font-size: 13px; color: var(--muted-foreground); min-width: 20px; }
+  .sw[aria-checked="true"] .sw-state { color: var(--primary); }
+  .ch-desc { font-size: 13px; color: var(--muted-foreground); line-height: 18px; }
+  .ch-eff { display: flex; flex-direction: column; gap: 2px; margin-left: auto; min-width: 0; }
+  .ch-eff-k { font-size: 13px; color: var(--muted-foreground); }
+  .ch-eff b { font-size: 14px; font-weight: 600; word-break: break-word; }
+  .mode-note { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 14px; line-height: 20px; color: var(--muted-foreground); }
+  .guard-area { margin-bottom: 24px; }
+  .guard-area .guard-banner { margin-bottom: 0; }
+  .guard-banner .gb-line { margin-top: 4px; }
+
+  /* ---------- 第二轮：命中行就地展开（分阶段位次） ---------- */
+  .hits-table tr[data-hit] { cursor: pointer; }
+  .hits-table tr[data-hit] .exp-btn svg { transition: transform .15s; }
+  .hits-table tr[data-hit].expanded .exp-btn svg { transform: rotate(90deg); }
+  .rank-cell { display: flex; align-items: center; justify-content: flex-end; gap: 2px; }
+  .rank-cell .exp-btn { width: 22px; height: 22px; }
+  .rank-cell .exp-btn svg { width: 13px; height: 13px; }
+  .hit-detail td { background: var(--surface-subtle); padding: 12px 16px 16px 56px; }
+  .hit-detail .hd-k { font-size: 13px; color: var(--muted-foreground); margin-bottom: 6px; }
+  .hit-detail .hd-row + .hd-row { margin-top: 12px; }
+  .hit-detail .hd-note { font-size: 14px; line-height: 20px; }
+  /* 分阶段位次 chips 的字号下限（共享 chip 内部为 12px，本页统一抬到 13px） */
+  #result-area .stage-rank .rk, #result-area .stage-rank .sc { font-size: 13px; }
+  .panel-pad { padding: 14px 16px; }
+
+  /* ---------- 第二轮：标题路径编号修复对照（R2-T1） ---------- */
+  .path-fix { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 14px 16px; margin-bottom: 24px; }
+  .path-fix .pf-title { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
+  .path-fix .pf-sub { font-size: 13px; color: var(--muted-foreground); margin-bottom: 10px; }
+  .path-fix .pf-row { display: flex; gap: 10px; align-items: baseline; line-height: 22px; }
+  .path-fix .pf-label { flex: none; width: 48px; font-size: 14px; color: var(--muted-foreground); }
+  .path-fix .pf-path { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace; font-size: 14px; word-break: break-all; }
+  .path-fix .pf-row.before .pf-path { text-decoration: line-through; text-decoration-color: var(--destructive); }
+  .path-fix .pf-row.after .pf-label { color: var(--foreground); font-weight: 500; }
+  .path-fix .pf-note { font-size: 14px; line-height: 20px; color: var(--muted-foreground); margin-top: 8px; }
+
+  @media (max-width: 1000px) { .rs-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 720px) {
+    .run-btn { margin-top: 0; width: 100%; }
+    .q-group.grow { flex-basis: 100%; min-width: 0; }
+    .q-group .select { width: 100%; }
+    .ch-eff { margin-left: 0; flex-basis: 100%; }
+    .path-fix .pf-row { flex-direction: column; gap: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="sidebar-scrim" id="sidebar-scrim"></div>
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" id="menu-btn" aria-label="打开导航">☰</button>
+      <div class="crumb"><b>检索调试</b></div>
+    </header>
+    <main class="content">
+      <div class="content-inner">
+        <div class="page-header">
+          <div>
+            <h1>检索调试</h1>
+            <div class="sub">排查召回与生成依据；日常提问请使用「知识问答」。</div>
+          </div>
+        </div>
+
+        <!-- 正常页面内容 -->
+        <div id="page-normal">
+          <section class="q-section">
+            <div class="query-row">
+              <div class="q-group">
+                <label class="label" for="kb-select">知识库</label>
+                <select id="kb-select" class="select"></select>
+              </div>
+              <div class="q-group grow">
+                <label class="label" for="q-input">问题</label>
+                <input id="q-input" class="input" placeholder="输入要调试的问题，例如：支付回调超时一般怎么排查？" autocomplete="off">
+                <div class="field-error" id="q-error" hidden>请输入要调试的问题</div>
+              </div>
+              <button class="btn btn-primary run-btn" id="run-btn">执行检索调试</button>
+            </div>
+            <div class="sample-row" id="sample-row"></div>
+            <div class="alert alert-info" id="kb-empty-notice" hidden>该知识库暂无文档，无法执行检索调试。请先在「知识库」中上传文档并完成入库。</div>
+          </section>
+
+          <section class="mode-bar" id="mode-bar" hidden></section>
+
+          <div class="guard-area" id="guard-area" hidden></div>
+
+          <section class="cfg" id="cfg-section" hidden>
+            <div class="cfg-head">
+              <h2>生效检索配置</h2>
+              <span class="cfg-hint">只读，来自知识库检索配置；topK 与 minScore 可在侧栏演示控制中临时调整观察过滤效果</span>
+            </div>
+            <div class="cfg-grid" id="cfg-grid"></div>
+          </section>
+
+          <div id="result-area" aria-live="polite"></div>
+
+          <section class="path-fix" id="path-fix-section" hidden>
+            <h2 class="pf-title">标题路径编号修复对照</h2>
+            <div class="pf-sub">第二轮修复：分块入库时不再把原文标题里已有的编号重复拼接。</div>
+            <div class="pf-row before"><span class="pf-label">修复前</span><span class="pf-path"></span></div>
+            <div class="pf-row after"><span class="pf-label">修复后</span><span class="pf-path"></span></div>
+            <div class="pf-note"></div>
+          </section>
+        </div>
+
+        <!-- 首屏加载骨架（演示开关触发） -->
+        <div id="page-skeleton" hidden aria-hidden="true">
+          <div class="skeleton-block" style="flex-direction:row; flex-wrap:wrap; gap:12px">
+            <div class="skeleton skeleton-line" style="width:220px; height:36px"></div>
+            <div class="skeleton skeleton-line" style="flex:1; min-width:200px; height:36px"></div>
+            <div class="skeleton skeleton-line" style="width:130px; height:36px"></div>
+          </div>
+          <div class="skeleton-block">
+            <div class="skeleton skeleton-line" style="width:38%"></div>
+            <div class="skeleton skeleton-line" style="width:72%"></div>
+            <div class="skeleton skeleton-line" style="width:55%"></div>
+          </div>
+          <div class="skeleton-block">
+            <div class="skeleton skeleton-line" style="width:30%"></div>
+            <div class="skeleton skeleton-line" style="width:86%"></div>
+            <div class="skeleton skeleton-line" style="width:62%"></div>
+            <div class="skeleton skeleton-line" style="width:74%"></div>
+          </div>
+        </div>
+
+        <div style="height:32px"></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="ui.js"></script>
+<script src="data.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = (s) => document.querySelector(s);
+  const KBs = MockData.knowledgeBases;
+
+  const state = {
+    kbId: null, q: '', sim: 'normal',
+    topK: null, minScore: null,
+    executed: false, lastQuestion: null, running: false,
+    // 第二轮：检索通道开关（混合 / 重排）与重排降级注入
+    hybrid: true, rerank: true, degraded: false,
+    expanded: {}, showPathFix: false,
+  };
+
+  const fmtScore = (n) => n.toFixed(3);
+  const fmtMin = (n) => n.toFixed(2);
+  const maxScoreOf = (arr) => arr.reduce((m, h) => Math.max(m, h.score), 0);
+  function hashStr(s) { let h = 7; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; }
+  function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+  const SVG_SEARCH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>';
+  const SVG_SEARCH_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="m9 9 4 4"/><path d="m13 9-4 4"/></svg>';
+  const SVG_SERVER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01"/><path d="M6 18h.01"/></svg>';
+  const SVG_ALERT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
+
+  function kbConfig() { const sc = MockData.debugScenarios[state.kbId]; return sc ? sc.config : null; }
+
+  /* =========================================================
+     第二轮：检索通道模型（混合 / 重排）与分阶段位次来源
+     位次只来自 MockData 中「与本次模式一致的记录运行」；无对应记录时
+     显示「未记录」，不在页面内推算或编造任何位次与分数。
+     ========================================================= */
+  const MODE_RUN = {
+    VECTOR: 'run-20260914-01',
+    HYBRID: 'run-20260914-02',
+    RERANK: 'run-20260914-03',
+    DEGRADED: 'run-20260914-04',
+  };
+
+  function modeKey() {
+    if (!state.hybrid) return state.rerank ? 'VECTOR_RERANK' : 'VECTOR';
+    if (!state.rerank) return 'HYBRID';
+    return state.degraded ? 'DEGRADED' : 'HYBRID_RERANK';
+  }
+
+  function modeInfo() {
+    const M = MockData.retrievalModes;
+    const table = {
+      VECTOR: { label: M.VECTOR.label, run: MODE_RUN.VECTOR, stages: ['向量'], note: '' },
+      VECTOR_RERANK: {
+        label: '向量检索 + 重排', run: MODE_RUN.VECTOR, rerankSource: MODE_RUN.RERANK, stages: ['向量', '重排'],
+        note: '模拟数据没有「仅向量候选 + 重排」的记录运行：候选与顺序取自「向量检索」运行，重排位次取自同一问题在「混合检索 + 重排」运行中出现的同一分块；未出现的分块不显示重排位次。真实实现中重排直接作用于本次候选列表。',
+      },
+      HYBRID: { label: M.HYBRID.label, run: MODE_RUN.HYBRID, stages: ['向量', 'BM25', '融合'], note: '' },
+      HYBRID_RERANK: { label: M.HYBRID_RERANK.label, run: MODE_RUN.RERANK, stages: ['向量', 'BM25', '融合', '重排'], note: '' },
+      DEGRADED: {
+        label: '混合检索 + 重排（本次降级为融合顺序）', run: MODE_RUN.DEGRADED,
+        stages: ['向量', 'BM25', '融合'], note: '',
+      },
+    };
+    const k = modeKey();
+    return Object.assign({ key: k }, table[k]);
+  }
+
+  /** 命中分块所属文档 id（跨知识库查找，供「查看分块」链接使用）。 */
+  function docIdOfChunk(chunkId) {
+    const kbIds = Object.keys(MockData.documents);
+    for (let i = 0; i < kbIds.length; i++) {
+      const docs = MockUtil.docs(kbIds[i]);
+      for (let j = 0; j < docs.length; j++) {
+        if (MockUtil.chunksOf(docs[j].id).some((c) => c.id === chunkId)) return docs[j].id;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 该问题在指定记录运行中的逐题明细。
+   * 仅接受与当前知识库一致的记录运行：模拟数据中的分阶段位次只记录在
+   * 「团队技术文档库」的运行上，跨库复用会把别的库的命中混进本库调试结果。
+   * 无匹配记录时返回 null，页面显示「未记录分阶段位次」而不是推算位次。
+   */
+  function recordedItem(question, runId) {
+    const run = MockUtil.run(runId);
+    if (!run || run.kbId !== state.kbId) return null;
+    const q = MockData.evalQuestionBank.find((x) => x.question === question);
+    if (!q) return null;
+    return MockUtil.runItems(runId).find((i) => i.seq === q.seq) || null;
+  }
+
+  /** 分阶段位次 chips（按本次实际参与的通道过滤，未参与的通道不显示）。 */
+  function stageChips(hit, info, degraded) {
+    if (!hit.staged) return '';
+    const mode = info.stages.indexOf('重排') >= 0 ? 'HYBRID_RERANK' : (info.stages.indexOf('BM25') >= 0 ? 'HYBRID' : 'VECTOR');
+    const chips = MockUtil.stageRanks(hit, mode, degraded).filter((c) => info.stages.indexOf(c.label) >= 0);
+    if (!chips.length) return '';
+    const finalLabel = info.stages[info.stages.length - 1];
+    const dec = (v) => (typeof v === 'number' ? String(v) : '—');
+    const shown = {};
+    chips.forEach((c) => { shown[c.label] = true; });
+    // 本次模式使用了该通道、但该候选没有记录值：明确标 未参与，不打印 #null。
+    const absent = info.stages.filter((s) => !shown[s]);
+    return `<div class="stage-ranks">${chips.map((c) => `
+      <span class="stage-rank${c.label === finalLabel ? ' is-final' : ''}">
+        <span class="stage">${escapeHtml(c.label)}</span>
+        <span class="rk">#${c.rank}</span>
+        <span class="sc">· ${c.score == null ? '—' : escapeHtml(dec(c.score))}</span>
+      </span>`).join('')}${absent.map((s) => `
+      <span class="stage-rank muted"><span class="stage">${escapeHtml(s)}</span><span class="rk">未参与</span></span>`).join('')}</div>`;
+  }
+
+  /** 记录运行 → 命中行（分阶段字段齐全）；无记录返回 null。 */
+  function recordedHits(question, info) {
+    const item = recordedItem(question, info.run);
+    if (!item) return null;
+    let rerankMap = null;
+    if (info.rerankSource) {
+      const ri = recordedItem(question, info.rerankSource);
+      if (ri) {
+        rerankMap = {};
+        ri.retrieved.forEach((h) => { rerankMap[h.chunkId] = h; });
+      }
+    }
+    return item.retrieved.map((h, i) => {
+      const rr = rerankMap ? rerankMap[h.chunkId] : null;
+      const merged = rr
+        ? Object.assign({}, h, { rerankRank: rr.rerankRank, rerankScore: rr.rerankScore })
+        : h;
+      const c = MockUtil.chunkById(h.chunkId);
+      return Object.assign({}, merged, {
+        rank: i + 1,
+        docId: docIdOfChunk(h.chunkId),
+        text: c ? c.text : '',
+        chars: c ? c.chars : null,
+        staged: true,
+      });
+    });
+  }
+
+  /* ---------- 结果构造：预置场景优先，自定义问题生成确定性的低分“未召回”样本 ---------- */
+  function pseudoRun(q) {
+    const h = hashStr(q);
+    const pool = [];
+    MockUtil.docs(state.kbId).filter((d) => d.status === 'completed').forEach((d) => {
+      MockUtil.chunksOf(d.id).forEach((c) => pool.push({ d, c }));
+    });
+    const hits = [];
+    if (pool.length) {
+      const i1 = h % pool.length;
+      const i2 = (i1 + 1 + ((h >> 4) % Math.max(1, pool.length - 1))) % pool.length;
+      const s1 = 0.280 - (h % 30) / 1000;              // 0.250–0.279，默认阈值下必被过滤
+      const s2 = Math.min(0.219, s1 - 0.04) - ((h >> 6) % 40) / 1000;
+      [[pool[i1], s1], [pool[i2], s2]].forEach(([p, score], idx) => {
+        hits.push({ rank: idx + 1, score, docId: p.d.id, docName: p.d.name, chunkId: p.c.id, titlePath: p.c.titlePath, page: p.c.page || null, chars: p.c.chars, text: p.c.text });
+      });
+    }
+    const embedMs = 44 + h % 18, searchMs = 27 + (h >> 3) % 14;
+    return { hits, timings: { embedMs, searchMs, totalMs: embedMs + searchMs + 3, llmFirstTokenMs: null, llmTotalMs: null }, contextSent: '', issues: null };
+  }
+
+  function buildResult(question) {
+    const info = modeInfo();
+    const refusal = (MockData.refusalDemo.kbId === state.kbId && MockData.refusalDemo.question === question)
+      ? MockData.refusalDemo : null;
+
+    let run;
+    let stagedSource = '';
+    if (refusal) {
+      // 拒答演示：检索确实返回了高于阈值的命中，但回答被拒、引用被清空。
+      run = {
+        hits: refusal.hits.map((h) => Object.assign({}, h, { staged: false })),
+        timings: { embedMs: 51, searchMs: 34, totalMs: 88, llmFirstTokenMs: 655, llmTotalMs: 1740 },
+        contextSent: '', issues: null,
+      };
+      stagedSource = 'refusal';
+    } else {
+      const recorded = recordedHits(question, info);
+      if (recorded) {
+        const r = MockUtil.run(info.run);
+        run = {
+          hits: recorded,
+          timings: {
+            embedMs: 58, searchMs: 41, totalMs: 102,
+            llmFirstTokenMs: null, llmTotalMs: null,
+          },
+          contextSent: '', issues: null,
+        };
+        stagedSource = `记录运行「${r.title}」（${r.createdAt}）`;
+        if (info.rerankSource) stagedSource += ' + 重排位次来自「混合检索 + 重排」运行';
+      } else {
+        const sc = MockData.debugScenarios[state.kbId];
+        const sr = (sc && sc.runs[question]) ? JSON.parse(JSON.stringify(sc.runs[question])) : pseudoRun(question);
+        run = sr;
+        run.hits = (sr.hits || []).map((h) => Object.assign({}, h, { staged: false }));
+        stagedSource = (sc && sc.runs[question]) ? '预置调试场景（未记录分阶段位次）' : '本次调试即时生成';
+      }
+    }
+
+    const topK = state.topK, minScore = state.minScore;
+    const allHits = run.hits || [];
+    const candidates = allHits.slice(0, topK);
+    // 过滤按当前 minScore 实时重算（含记录运行），保证调高阈值一定收敛为 filtered-empty；
+    // 落库快照里 passedThreshold=false 的命中另外标注「未通过阈值」。
+    const pass = candidates.filter((h) => h.score >= minScore);
+    const filtered = candidates.filter((h) => h.score < minScore);
+    const omitted = allHits.length - candidates.length;
+
+    // 问题线索：随当前阈值动态计算，保证调参后文案与结果一致
+    let issues = null;
+    if (candidates.length === 0) {
+      issues = '未召回：检索未返回任何候选。';
+    } else if (pass.length === 0) {
+      let advice = '未找到与该问题相关的资料，可更换问法或扩大知识库范围。';
+      if (run.issues) { const parts = run.issues.split('。'); if (parts.length > 1) advice = parts.slice(1).join('。'); }
+      issues = `未召回：最高相似度 ${fmtScore(maxScoreOf(candidates))} 低于阈值 ${fmtMin(minScore)}。${advice}`;
+    }
+
+    // 上下文：预置文案优先；阈值调整导致候选变化时动态重建，避免展示过期内容
+    let context = run.contextSent || '';
+    const placeholder = context.indexOf('（无候选') === 0;
+    if (pass.length === 0) {
+      context = `（无候选超过 minScore=${fmtMin(minScore)}，未构造上下文）`;
+    } else if (refusal) {
+      context = `（模型判定证据不足：命中 ${pass.length} 条但均不足以支撑回答，未构造生成上下文，引用区已清空）`;
+    } else if (placeholder || !context) {
+      context = pass.map((h, i) => `【文档 ${i + 1}】${h.docName}${h.page ? `（第 ${h.page} 页）` : ''}\n${h.titlePath}\n${h.text}`).join('\n\n');
+    }
+
+    const t = Object.assign({}, run.timings);
+    if (pass.length > 0 && !refusal && (t.llmFirstTokenMs == null || t.llmTotalMs == null)) {
+      const h = hashStr(question);
+      t.llmFirstTokenMs = 680 + h % 120;
+      t.llmTotalMs = t.llmFirstTokenMs + 2100 + (h >> 3) % 900;
+    }
+    return { question, candidates, pass, filtered, omitted, topK, minScore, issues, context, timings: t, info, stagedSource, refusal };
+  }
+
+  /* ---------- 渲染 ---------- */
+  function renderQueryUI() {
+    $('#kb-select').innerHTML = KBs.map((k) => `<option value="${k.id}" ${k.id === state.kbId ? 'selected' : ''}>${escapeHtml(k.name)}</option>`).join('');
+    $('#q-input').value = state.q;
+    const kb = MockUtil.kb(state.kbId);
+    const isNew = !kb || kb.docCount === 0;
+    const btn = $('#run-btn');
+    if (!state.running) btn.textContent = '执行检索调试';
+    btn.disabled = isNew || state.running;
+    $('#kb-empty-notice').hidden = !isNew;
+
+    const qs = MockData.sampleQuestions[state.kbId] || [];
+    const row = $('#sample-row');
+    const extras = [];
+    // 拒答语义演示（R2-A1）：同一问题在问答页拒答且引用为空，命中只在调试页可见。
+    if (MockData.refusalDemo.kbId === state.kbId) extras.push({ q: MockData.refusalDemo.question, tag: '拒答演示' });
+    // 有记录运行的问题可展示分阶段位次，取前 3 个作为演示入口，避免示例区堆成长列表。
+    MockData.evalQuestionBank.filter((q) => recordedItem(q.question, modeInfo().run)).slice(0, 3).forEach((q) => {
+      if (qs.indexOf(q.question) >= 0 || extras.some((e) => e.q === q.question)) return;
+      extras.push({ q: q.question, tag: '含阶段位次' });
+    });
+    const total = qs.length + extras.length;
+    row.hidden = total === 0;
+    row.innerHTML = total
+      ? '<span class="muted">示例问题：</span>'
+        + qs.map((q) => `<button type="button" class="q-chip" data-q="${escapeHtml(q)}">${escapeHtml(q)}</button>`).join('')
+        + extras.map((e) => `<button type="button" class="q-chip" data-q="${escapeHtml(e.q)}">${escapeHtml(e.q)}<span class="chip-tag">${escapeHtml(e.tag)}</span></button>`).join('')
+      : '';
+    row.querySelectorAll('.q-chip').forEach((b) => b.addEventListener('click', () => {
+      state.q = b.dataset.q;
+      $('#q-input').value = state.q;
+      clearQError();
+      executeRun(state.q);
+    }));
+  }
+
+  function renderConfig() {
+    const cfg = kbConfig();
+    const sec = $('#cfg-section');
+    if (!cfg) { sec.hidden = true; return; }
+    sec.hidden = false;
+    const info = modeInfo();
+    const items = [
+      ['检索模式', info.label],
+      ['topK', state.topK],
+      ['minScore', fmtMin(state.minScore)],
+      ['向量维度', cfg.vectorDim],
+      ['相似度度量', cfg.metric],
+      ['分块策略', cfg.chunkStrategy],
+      ['Embedding 模型', cfg.embeddingModel],
+      ['生成模型', cfg.generatorModel],
+    ];
+    $('#cfg-grid').innerHTML = items.map(([k, v]) => `<div class="cfg-item"><span class="cfg-k">${escapeHtml(k)}</span><span class="cfg-v">${escapeHtml(String(v))}</span></div>`).join('');
+  }
+
+  /* ---------- 通道开关 + 降级提示带 ---------- */
+  function renderModeBar() {
+    const host = $('#mode-bar');
+    if (!host) return;
+    const info = modeInfo();
+    const sw = (id, on, label, desc) => `
+      <div class="ch-item">
+        <button class="sw" type="button" id="${id}" role="switch" aria-checked="${on}">
+          <span class="sw-track"><span class="sw-knob"></span></span>
+          <span>${label}</span>
+          <span class="sw-state">${on ? '开' : '关'}</span>
+        </button>
+        <div class="ch-desc">${desc}</div>
+      </div>`;
+    host.innerHTML = `
+      <div class="mode-head">
+        <h2>检索通道</h2>
+        <span class="mode-hint">开关直接决定本次调试实际执行与展示的阶段</span>
+      </div>
+      <div class="ch-row">
+        ${sw('sw-hybrid', state.hybrid, '混合检索（BM25 + 向量 · RRF 融合）', state.hybrid ? 'BM25 与向量双通道候选，RRF 融合定序' : '仅向量通道（kNN）')}
+        ${sw('sw-rerank', state.rerank, '重排', state.rerank ? '对候选调用重排模型重新定序' : '跳过重排，直接使用上一阶段顺序')}
+        <div class="ch-eff">
+          <span class="ch-eff-k">本次生效检索模式</span>
+          <b>${escapeHtml(info.label)}</b>
+        </div>
+      </div>
+      ${info.note ? `<div class="mode-note">${escapeHtml(info.note)}</div>` : ''}`;
+    $('#sw-hybrid').addEventListener('click', () => { state.hybrid = !state.hybrid; onChannelChange(); });
+    $('#sw-rerank').addEventListener('click', () => { state.rerank = !state.rerank; onChannelChange(); });
+  }
+
+  function renderGuard() {
+    const host = $('#guard-area');
+    if (!host) return;
+    const show = state.rerank && state.degraded && state.executed && !state.running && state.sim === 'normal';
+    host.hidden = !show;
+    if (!show) { host.innerHTML = ''; return; }
+    host.innerHTML = `<div class="guard-banner" role="status">${SVG_ALERT}
+      <div class="gb-body">
+        <div class="gb-title">重排服务超时，本次已降级为融合顺序</div>
+        <div class="gb-line">重排请求失败后按规则回退到融合顺序；下方结果使用的是融合顺序，不含任何重排分数。降级结果与正常重排结果不可直接比较。</div>
+      </div>
+    </div>`;
+  }
+
+  /* ---------- 标题路径编号修复对照（R2-T1） ---------- */
+  function renderPathFix() {
+    const sec = $('#path-fix-section');
+    if (!sec) return;
+    sec.hidden = !state.showPathFix;
+    if (!state.showPathFix) return;
+    const d = MockData.titlePathFixDemo;
+    sec.innerHTML = `
+      <h2 class="pf-title">标题路径编号修复对照</h2>
+      <div class="pf-sub">第二轮修复：分块入库时不再把原文标题里已有的编号重复拼接。</div>
+      <div class="pf-row before"><span class="pf-label">修复前</span><span class="pf-path">${escapeHtml(d.before)}</span></div>
+      <div class="pf-row after"><span class="pf-label">修复后</span><span class="pf-path">${escapeHtml(d.after)}</span></div>
+      <div class="pf-note">${escapeHtml(d.note)}</div>`;
+  }
+
+  function hitsTable(hits, info, degraded) {
+    const rows = hits.map((h) => {
+      const filtered = h.score < state.minScore;
+      const key = h.chunkId;
+      const open = !!state.expanded[key];
+      const tagged = h.passedThreshold === false;
+      const badge = filtered ? '<div><span class="badge badge-neutral">已过滤</span></div>'
+        : (tagged ? '<div><span class="badge badge-warning">未通过阈值</span></div>' : '');
+      const detail = open ? `
+        <tr class="hit-detail"><td colspan="6">
+          <div class="hd-row">
+            <div class="hd-k">各阶段位次与分数（本次实际参与 ${info.stages.join(' / ')}）</div>
+            ${h.staged ? stageChips(h, info, degraded) : '<div class="hd-note">该问题没有记录运行，本次调试未记录分阶段位次。</div>'}
+          </div>
+          ${h.rankChangedReason ? `<div class="hd-row"><div class="hd-k">顺序变化原因</div><div class="hd-note">${escapeHtml(h.rankChangedReason)}</div></div>` : ''}
+          <div class="hd-row">
+            <div class="hd-k">内容</div>
+            <div class="hd-note">${escapeHtml(h.text || '（分块内容来自预置场景，暂未收录全文）')}</div>
+          </div>
+        </td></tr>` : '';
+      return `<tr data-hit="${escapeHtml(key)}" class="${filtered ? 'row-filtered' : ''} ${open ? 'expanded' : ''}" aria-expanded="${open}">
+        <td class="num" style="width:76px"><div class="rank-cell">
+          <button class="icon-btn exp-btn" aria-label="${open ? '收起' : '展开'}第 ${h.rank} 名的阶段位次" aria-expanded="${open}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </button><span>${h.rank}</span>
+        </div></td>
+        <td class="num score-cell">${fmtScore(h.score)}${badge}</td>
+        <td><div class="cell-main">${escapeHtml(h.docName)}</div><div class="cell-sub">${escapeHtml(h.titlePath)}</div></td>
+        <td class="td-page">${h.page ? `第 ${h.page} 页` : '—'}</td>
+        <td><div class="sum">${escapeHtml(h.text || '（预置场景未收录全文）')}</div>${h.note ? `<div class="cell-sub note-line">${escapeHtml(h.note)}</div>` : ''}</td>
+        <td>${h.docId ? `<a class="btn btn-outline btn-sm" href="doc-detail.html?doc=${h.docId}&chunk=${h.chunkId}">查看分块</a>` : '<span class="muted">—</span>'}</td>
+      </tr>${detail}`;
+    }).join('');
+    return `<table class="table hits-table">
+      <thead><tr>
+        <th class="num" style="width:76px">排名</th>
+        <th class="num" style="width:128px">检索分数</th>
+        <th style="width:250px">文档 / 标题路径</th>
+        <th class="th-page" style="width:80px">页码</th>
+        <th>分块内容摘要</th>
+        <th style="width:96px">操作</th>
+      </tr></thead>
+      <tbody>${rows}</tbody></table>`;
+  }
+
+  function renderResult(kind) {
+    const area = $('#result-area');
+    if (kind === 'idle') {
+      area.innerHTML = `<div class="empty-state">${SVG_SEARCH}
+        <div class="t">输入问题执行一次调试</div>
+        <div class="d">选择知识库并输入问题，执行后可查看命中分块、检索分数、各阶段耗时与实际送入模型的上下文。</div>
+      </div>`;
+      return;
+    }
+    if (kind === 'loading') {
+      const skRow = `<div class="skeleton-row"><div class="skeleton skeleton-line" style="width:28px"></div><div class="skeleton skeleton-line" style="width:56px"></div><div class="skeleton skeleton-line grow"></div><div class="skeleton skeleton-line" style="width:64px"></div></div>`;
+      area.innerHTML = `
+        <div class="stage-running"><span class="spinner"></span>正在执行检索…</div>
+        <section class="rs">
+          <div class="rs-head"><h2>命中分块</h2></div>
+          <div class="table-wrap">${skRow}${skRow}${skRow}</div>
+        </section>
+        <div class="rs-grid">
+          <section class="rs"><div class="rs-head"><h2>各阶段耗时</h2></div><div class="skeleton skeleton-line" style="height:150px"></div></section>
+          <section class="rs"><div class="rs-head"><h2>实际送入模型的上下文</h2></div><div class="skeleton skeleton-line" style="height:160px"></div></section>
+        </div>`;
+      return;
+    }
+    if (kind === 'error') {
+      area.innerHTML = `<div class="error-state">${SVG_SERVER}
+        <div class="t">检索服务不可用</div>
+        <div class="d">检索服务无响应，本次调试未执行。可点击重试再次执行。</div>
+        <button class="btn btn-outline" id="retry-btn">重试</button>
+      </div>`;
+      $('#retry-btn').addEventListener('click', retryRun);
+      return;
+    }
+
+    const res = buildResult(state.lastQuestion);
+    const info = res.info;
+    const degraded = info.key === 'DEGRADED';
+    const refusalBanner = res.refusal ? `<div class="guard-banner" role="status">${SVG_ALERT}
+      <div class="gb-body">
+        <div class="gb-title">检索有命中，回答仍被拒答，引用已清空</div>
+        <div class="gb-line">${escapeHtml(res.refusal.debugNote)}</div>
+        <div class="gb-note">问答页按同一份数据回答「${escapeHtml(res.refusal.answer)}」且引用区为空；这些命中只在检索调试页可见。</div>
+      </div>
+    </div>` : '';
+    const issueHtml = res.issues
+      ? `<div class="alert alert-warning">${SVG_ALERT}<div><b>问题线索：</b>${escapeHtml(res.issues)}</div></div>`
+      : '';
+    let meta = `召回 ${res.candidates.length} 个候选（topK=${res.topK}）· 通过阈值 ${res.pass.length} 个`;
+    if (res.omitted > 0) meta += ` · 另有 ${res.omitted} 个候选超出 topK 未返回`;
+    meta += ` · 检索模式：${info.label}`;
+    if (info.stages.indexOf('重排') < 0) meta += '（无重排阶段）';
+    const sourceLine = `<div class="rs-meta">位次来源：${escapeHtml(res.stagedSource)}</div>`;
+
+    let hitsHtml;
+    if (res.candidates.length === 0) {
+      hitsHtml = `<div class="empty-state">${SVG_SEARCH}<div class="t">未召回任何候选</div><div class="d">知识库中没有返回候选，请更换问法或检查知识库范围。</div></div>`;
+    } else if (res.pass.length === 0) {
+      hitsHtml = `<div class="empty-state">${SVG_SEARCH_OFF}
+          <div class="t">无候选通过阈值</div>
+          <div class="d">共召回 ${res.candidates.length} 个候选，最高分 ${fmtScore(maxScoreOf(res.candidates))} 低于当前阈值 ${fmtMin(res.minScore)}。可降低 minScore 或更换问法。</div>
+        </div>
+        <details class="filtered-details">
+          <summary>查看被过滤的候选（${res.filtered.length} 条）</summary>
+          <div class="table-wrap mt-8">${hitsTable(res.filtered, info, degraded)}</div>
+        </details>`;
+    } else {
+      hitsHtml = `<div class="table-wrap">${hitsTable(res.candidates, info, degraded)}</div>`;
+    }
+
+    const T = res.timings;
+    const tg = (label, v) => `<div class="tg-item"><span class="tg-k">${label}</span><span class="tg-v">${v == null ? '—' : v + ' ms'}</span></div>`;
+    const rerankTiming = state.rerank
+      ? (state.degraded ? tg('重排（超时未完成）', null) : tg('重排', 132))
+      : tg('重排（未启用）', null);
+
+    area.innerHTML = `
+      ${refusalBanner}
+      ${issueHtml}
+      <section class="rs">
+        <div class="rs-head"><h2>命中分块</h2><span class="rs-meta">${meta}</span></div>
+        ${sourceLine}
+        ${hitsHtml}
+      </section>
+      <div class="rs-grid">
+        <section class="rs">
+          <div class="rs-head"><h2>各阶段耗时</h2></div>
+          <div class="table-wrap"><div>
+            ${tg('向量化', T.embedMs)}
+            ${tg('向量检索', T.searchMs)}
+            ${rerankTiming}
+            ${tg('总检索耗时', T.totalMs)}
+            ${tg('模型首 Token', T.llmFirstTokenMs)}
+            ${tg('模型总耗时', T.llmTotalMs)}
+          </div></div>
+        </section>
+        <section class="rs">
+          <div class="rs-head"><h2>实际送入模型的上下文</h2></div>
+          <div class="table-wrap"><pre class="ctx"></pre></div>
+        </section>
+      </div>`;
+    area.querySelector('.ctx').textContent = res.context;
+  }
+
+  function renderAll() {
+    const loadingPage = state.sim === 'loading';
+    $('#page-normal').hidden = loadingPage;
+    $('#page-skeleton').hidden = !loadingPage;
+    if (loadingPage) return;
+    renderQueryUI();
+    const showChannels = !!kbConfig();
+    const modeEl = $('#mode-bar');
+    modeEl.hidden = !showChannels;
+    if (showChannels) renderModeBar();
+    renderGuard();
+    renderConfig();
+    renderPathFix();
+    renderResult(state.sim === 'error' ? 'error' : (state.executed ? 'result' : 'idle'));
+  }
+
+  /** 通道开关变化：重排关闭时清除降级态；结果与位次全部重算。 */
+  function onChannelChange() {
+    if (!state.rerank) state.degraded = false;
+    state.expanded = {};
+    renderAll();
+  }
+
+  /* ---------- 交互 ---------- */
+  function showQError() { $('#q-error').hidden = false; $('#q-input').classList.add('invalid'); $('#q-input').focus(); }
+  function clearQError() { $('#q-error').hidden = true; $('#q-input').classList.remove('invalid'); }
+
+  function updateUrl() {
+    try {
+      const p = new URLSearchParams();
+      p.set('kb', state.kbId);
+      if (state.lastQuestion) p.set('q', state.lastQuestion);
+      history.replaceState(null, '', 'debug.html?' + p.toString());
+    } catch (e) { /* file:// 下可能受限，忽略 */ }
+  }
+
+  function executeRun(q) {
+    if (state.running) return;
+    const kb = MockUtil.kb(state.kbId);
+    if (!kb || kb.docCount === 0) return;
+    state.running = true;
+    state.q = q;
+    state.lastQuestion = q;
+    state.executed = true;
+    state.expanded = {};
+    const btn = $('#run-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> 执行中…';
+    renderGuard();
+    renderResult('loading');
+    updateUrl();
+    const ranQ = q;
+    setTimeout(() => {
+      state.running = false;
+      const cur = MockUtil.kb(state.kbId);
+      btn.disabled = !cur || cur.docCount === 0;
+      btn.textContent = '执行检索调试';
+      // 执行期间切换知识库则丢弃本次结果
+      if (state.executed && state.lastQuestion === ranQ) {
+        renderGuard();
+        renderResult(state.sim === 'error' ? 'error' : 'result');
+      }
+    }, 600);
+  }
+
+  function retryRun() {
+    if (state.sim === 'error') {
+      state.sim = 'normal';
+      const s = $('#pt-sim');
+      if (s) s.value = '正常';
+    }
+    if (state.lastQuestion) executeRun(state.lastQuestion);
+    else renderAll();
+  }
+
+  function tryRun() {
+    const q = $('#q-input').value.trim();
+    if (!q) { showQError(); return; }
+    clearQError();
+    executeRun(q);
+  }
+
+  function onParamChange() {
+    renderConfig();
+    renderGuard();
+    if (state.executed && state.sim === 'normal') renderResult('result');
+  }
+
+  function resetParams() {
+    const cfg = kbConfig();
+    state.topK = cfg ? cfg.topK : 5;
+    state.minScore = cfg ? cfg.minScore : 0.30;
+    $('#pt-topk').value = String(state.topK);
+    $('#pt-minscore').value = String(state.minScore);
+    onParamChange();
+  }
+
+  function initProtoPanel() {
+    SupieUI.initProtoTools([
+      { label: '状态模拟', control: '<select id="pt-sim" class="select"><option>正常</option><option>首屏加载</option><option>检索服务错误</option></select>' },
+      { label: 'topK', control: '<select id="pt-topk" class="select"><option value="1">1</option><option value="3">3</option><option value="5">5</option><option value="10">10</option></select>' },
+      { label: 'minScore', control: '<select id="pt-minscore" class="select"><option value="0.1">0.10</option><option value="0.2">0.20</option><option value="0.3">0.30</option><option value="0.5">0.50</option><option value="0.7">0.70</option><option value="0.85">0.85</option><option value="0.9">0.90</option></select>' },
+      { label: '重排服务', control: '<select id="pt-rerankfail" class="select"><option>正常</option><option>超时（降级）</option></select>' },
+      { label: '标题路径对照', control: '<select id="pt-pathfix" class="select"><option>隐藏</option><option>显示</option></select>' },
+      { label: '检索参数', control: { type: 'button', text: '恢复本库默认', onClick: resetParams } },
+    ]);
+    $('#pt-topk').value = String(state.topK);
+    $('#pt-minscore').value = String(state.minScore);
+    $('#pt-sim').addEventListener('change', (e) => {
+      state.sim = { '正常': 'normal', '首屏加载': 'loading', '检索服务错误': 'error' }[e.target.value] || 'normal';
+      renderAll();
+    });
+    $('#pt-topk').addEventListener('change', (e) => { state.topK = parseInt(e.target.value, 10); onParamChange(); });
+    $('#pt-minscore').addEventListener('change', (e) => { state.minScore = parseFloat(e.target.value); onParamChange(); });
+    $('#pt-rerankfail').addEventListener('change', (e) => {
+      const fail = e.target.value === '超时（降级）';
+      if (fail && !state.rerank) {
+        state.rerank = true; // 降级以「已开启重排」为前提，不允许产生不可能组合
+        SupieUI.toast('已同时开启重排通道');
+      }
+      state.degraded = fail;
+      onChannelChange();
+      if (fail) SupieUI.toast('已注入重排服务超时：本次降级为融合顺序', 'error');
+    });
+    $('#pt-pathfix').addEventListener('change', (e) => {
+      state.showPathFix = e.target.value === '显示';
+      renderPathFix();
+    });
+  }
+
+  /* ---------- 命中行就地展开（表格随结果重渲染，故用委托监听） ---------- */
+  function bindRowExpand() {
+    $('#result-area').addEventListener('click', (e) => {
+      const tr = e.target.closest && e.target.closest('tr[data-hit]');
+      if (!tr) return;
+      const link = e.target.closest && e.target.closest('a');
+      if (link) return; // 「查看分块」跳转不触发展开
+      const key = tr.getAttribute('data-hit');
+      state.expanded[key] = !state.expanded[key];
+      if (state.executed && state.sim === 'normal') renderResult('result');
+    });
+  }
+
+  /* ---------- 初始化 ---------- */
+  function init() {
+    SupieUI.initShell('debug');
+    const params = new URLSearchParams(location.search);
+    const kbParam = params.get('kb');
+    state.kbId = KBs.some((k) => k.id === kbParam) ? kbParam : KBs[0].id;
+    const cfg = kbConfig();
+    state.topK = cfg ? cfg.topK : 5;
+    state.minScore = cfg ? cfg.minScore : 0.30;
+    state.q = params.get('q') || '';
+
+    $('#run-btn').addEventListener('click', tryRun);
+    $('#q-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') tryRun(); });
+    $('#q-input').addEventListener('input', (e) => { state.q = e.target.value; if (e.target.value.trim()) clearQError(); });
+    $('#kb-select').addEventListener('change', (e) => {
+      state.kbId = e.target.value;
+      const c = kbConfig();
+      state.topK = c ? c.topK : 5;
+      state.minScore = c ? c.minScore : 0.30;
+      state.executed = false;
+      state.lastQuestion = null;
+      state.running = false;
+      state.expanded = {};
+      state.degraded = false; // 降级注入只针对当前知识库的一次调试
+      clearQError();
+      renderAll();
+      const tk = $('#pt-topk'), ms = $('#pt-minscore'), rf = $('#pt-rerankfail');
+      if (tk) tk.value = String(state.topK);
+      if (ms) ms.value = String(state.minScore);
+      if (rf) rf.value = '正常';
+      updateUrl();
+    });
+
+    bindRowExpand();
+    renderAll();
+    initProtoPanel();
+
+    const qParam = params.get('q');
+    if (qParam && kbConfig()) executeRun(qParam);
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

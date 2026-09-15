@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 蓝白冷灰设计体系 token（enterprise-frontend-design/references/design-system.md） */
+:root {
+  --background: 210 33% 99%;
+  --foreground: 222 47% 11%;
+  --surface: 0 0% 100%;
+  --surface-subtle: 214 32% 97%;
+  --muted: 214 24% 95%;
+  --muted-foreground: 215 16% 42%;
+  --border: 214 24% 90%;
+  --input: 214 24% 86%;
+  --primary: 217 91% 55%;
+  --primary-hover: 217 91% 48%;
+  --primary-foreground: 0 0% 100%;
+  --primary-subtle: 217 91% 55% / 0.1;
+  --ring: 217 91% 60%;
+  --success: 158 64% 35%;
+  --success-bg: 158 64% 35% / 0.1;
+  --warning: 38 92% 42%;
+  --warning-bg: 38 92% 42% / 0.12;
+  --destructive: 0 72% 51%;
+  --destructive-bg: 0 72% 51% / 0.1;
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: 222 35% 8%;
+  --foreground: 210 40% 96%;
+  --surface: 222 30% 11%;
+  --surface-subtle: 220 26% 14%;
+  --muted: 218 22% 17%;
+  --muted-foreground: 215 20% 70%;
+  --border: 217 19% 23%;
+  --input: 217 19% 27%;
+  --primary: 214 95% 65%;
+  --primary-hover: 214 90% 72%;
+  --primary-foreground: 222 47% 11%;
+  --primary-subtle: 214 95% 65% / 0.14;
+  --ring: 214 95% 65%;
+  --success: 158 55% 55%;
+  --success-bg: 158 55% 55% / 0.14;
+  --warning: 38 92% 60%;
+  --warning-bg: 38 92% 60% / 0.14;
+  --destructive: 0 84% 65%;
+  --destructive-bg: 0 84% 65% / 0.14;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+/* 数字列使用 tabular-nums（分数、耗时、计数、时间） */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 长文本两行截断（命中摘要） */
+.truncate-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 分块定位高亮（与原型一致 2.2s） */
+@keyframes chunkHl {
+  0%,
+  55% {
+    background: hsl(var(--primary) / 0.14);
+  }
+  100% {
+    background: transparent;
+  }
+}
+.chunk-hl > td {
+  animation: chunkHl 2.2s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

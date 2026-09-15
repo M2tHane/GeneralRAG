@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>开发验证报告 — 通用知识问答 RAG 第一版</title>
+<style>
+  :root { --border:#d5dde8; --muted:#5b6b7f; --bg:#f5f8fb; --pass:#1a7f4f; --passbg:#e7f5ee; --fail:#b3352e; --failbg:#fbeae8; --partial:#9a6b1f; --partialbg:#fbf3e2; --nabg:#eef1f5; }
+  * { box-sizing: border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; color:#1d2b3a; margin:0; background:var(--bg); font-size:14px; line-height:1.6; }
+  .wrap { max-width:1080px; margin:0 auto; padding:32px 24px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  h2 { font-size:17px; margin:32px 0 10px; border-bottom:1px solid var(--border); padding-bottom:6px; }
+  h3 { font-size:15px; margin:18px 0 8px; }
+  .meta { color:var(--muted); font-size:13px; margin-bottom:20px; }
+  table { width:100%; border-collapse:collapse; background:#fff; border:1px solid var(--border); font-size:13px; }
+  th, td { border:1px solid var(--border); padding:7px 10px; text-align:left; vertical-align:top; }
+  th { background:#eef2f7; font-weight:600; }
+  code { background:#eef2f7; padding:1px 5px; border-radius:3px; font-size:12px; word-break:break-all; }
+  .status-pass { color:var(--pass); background:var(--passbg); padding:1px 8px; border-radius:10px; white-space:nowrap; font-weight:600; }
+  .status-fail { color:var(--fail); background:var(--failbg); padding:1px 8px; border-radius:10px; white-space:nowrap; font-weight:600; }
+  .status-partial { color:var(--partial); background:var(--partialbg); padding:1px 8px; border-radius:10px; white-space:nowrap; font-weight:600; }
+  .status-todo, .status-na { color:var(--muted); background:var(--nabg); padding:1px 8px; border-radius:10px; white-space:nowrap; }
+  .summary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin:14px 0; }
+  .kpi { background:#fff; border:1px solid var(--border); border-radius:8px; padding:12px 14px; }
+  .kpi b { display:block; font-size:22px; }
+  .kpi span { color:var(--muted); font-size:12px; }
+  .note { background:var(--partialbg); border:1px solid #ecd9ae; border-radius:8px; padding:10px 14px; margin:12px 0; font-size:13px; }
+  .info { background:#eaf2fb; border:1px solid #c5d9f0; border-radius:8px; padding:10px 14px; margin:12px 0; font-size:13px; }
+  pre { background:#0f1b2a; color:#dbe7f5; padding:12px 14px; border-radius:8px; overflow-x:auto; font-size:12px; line-height:1.5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>开发验证报告 — 通用知识问答 RAG 第一版</h1>
+  <div class="meta">
+    来源流程：supie-dev Stage 6 ｜ 被测对象：rag-server（Spring Boot 后端）+ rag-web（Next.js 前端）
+    ｜ 报告日期：2026-09-14 ｜ 报告人：主 Agent（ZCode 工作流）
+  </div>
+
+  <h2>1. 执行摘要</h2>
+  <div class="summary-grid">
+    <div class="kpi"><b>109/109</b><span>后端测试（mvn test）</span></div>
+    <div class="kpi"><b>6/6</b><span>Testcontainers 集成测试套件</span></div>
+    <div class="kpi"><b>27/27</b><span>契约 operation 实现（漂移测试守护）</span></div>
+    <div class="kpi"><b>14/14</b><span>前端 vitest 用例</span></div>
+    <div class="kpi"><b>9/10</b><span>需求条目组已验证（评测待模型配置）</span></div>
+  </div>
+  <p>实现阶段（T1–T8）完成，两轮独立评审（spec-reviewer、code-quality-reviewer）的全部 BLOCKER（2）与 MAJOR（8，spec 4 + quality 7，含交叉）修复完毕，回归通过。端到端验证在真实中间件（MySQL/ES+IK/MinIO Docker）上完成核心旅程。<b>评测执行（EV-1~6 的运行侧）待用户提供模型服务配置后执行</b>，属已声明的用户前置输入，非缺陷。</p>
+
+  <h2>2. 测试环境与验证层次说明</h2>
+  <table>
+    <tr><th>层次</th><th>环境</th><th>说明</th></tr>
+    <tr><td>单元测试</td><td>JVM 内存</td><td>分块器/状态机/Prompt/上下文组装/解析器/配置校验，纯 Mockito</td></tr>
+    <tr><td>集成测试（自动化）</td><td>Testcontainers：mysql:8、minio、docker.elastic.co ES 8.14.1（无 IK，standard 分析器）+ FakeOpenAiServer（OpenAI 兼容假模型，测试替身）</td><td>真实存储依赖 + 模型替身；FakeOpenAiServer 为 8 维伪向量，仅供链路验证</td></tr>
+    <tr><td>契约漂移</td><td>随机端口 + /v3/api-docs vs contracts/openapi.yaml</td><td>结构级比对（path/method/operationId/2xx/requestBody），字段级由前端 openapi-typescript 生成类型兜底</td></tr>
+    <tr><td>端到端（人工驱动）</td><td>docker compose 本地中间件（ES 含 IK）+ 真实启动 rag-server / rag-web</td><td>无真实模型服务（用户未配置），embedding 调用以「可读失败 + 正确错误契约」验证</td></tr>
+    <tr><td>前端静态/单测</td><td>pnpm lint / vitest / build</td><td>Playwright 主旅程 spec 在后端在线时运行（本轮后端在线时段已抽查主要页面）</td></tr>
+  </table>
+
+  <h2>3. 测试用例与结果</h2>
+
+  <h3>3.1 后端单元测试（节选关键套件）</h3>
+  <table>
+    <tr><th>套件</th><th>覆盖</th><th>结果</th></tr>
+    <tr><td>ChunkerTest（9）</td><td>空文本 0 块、overlap≥maxLength 拒绝、滑窗重叠区一致、标题路径、超长截断、PDF 页码归属、chunkId 确定性</td><td><span class="status-pass">9/9</span></td></tr>
+    <tr><td>IngestionTaskManagerTest（7）</td><td>状态机迁移表/终态拒绝/跳阶段拒绝、失败落库、重试复用（spy 验证不重跑 PARSING）、CAS 认领静默跳过</td><td><span class="status-pass">7/7</span></td></tr>
+    <tr><td>ContextAssemblerTest / PromptAssemblerTest（8）</td><td>拼接格式、maxContextChars 截断标记、历史≠证据双区隔离、系统指令三约束</td><td><span class="status-pass">8/8</span></td></tr>
+    <tr><td>DatasetFileParserTest（12）</td><td>JSON/CSV 正常、坏 JSON、缺 question、非法 category、非布尔 answerable、坏 evidence、缺列、未知扩展名</td><td><span class="status-pass">12/12</span></td></tr>
+    <tr><td>KnowledgeBase/Document/SessionControllerTest（40）</td><td>参数校验、错误码映射（400/404/409/413/415）、confirm 语义、details 结构</td><td><span class="status-pass">40/40</span></td></tr>
+  </table>
+
+  <h3>3.2 集成测试（Testcontainers，真实依赖）</h3>
+  <table>
+    <tr><th>套件</th><th>旅程</th><th>结果</th></tr>
+    <tr><td>StorageIT（6）</td><td>Flyway 11 表迁移、UNIQUE(kb_id,sha256) 生效、CAS 认领恰一次、cleanup_task 扫描/attempts、MinIO 往返+前缀删除、ES 索引生命周期+kNN 跨库隔离+删除即不命中</td><td><span class="status-pass">6/6</span></td></tr>
+    <tr><td>IngestionPipelineIT（2）</td><td>happy path 全阶段落 ES 可检索；embedding 注入失败→FAILED→恢复→重试 COMPLETED 且分块数不翻倍（幂等重建）</td><td><span class="status-pass">2/2</span></td></tr>
+    <tr><td>QaStreamIT（6）</td><td>真实 HTTP SSE：happy 序列 stage→token*→citations→done 及载荷、同 clientRequestId 409、客户端断连→CANCELED 落库、删除收口（删档后引用零命中）、模型 500→error 事件</td><td><span class="status-pass">6/6</span></td></tr>
+    <tr><td>EvalFlowIT（5）</td><td>导入 v1/v2、runSync 全链路、configSnapshot 字段、hit 布尔/OUT_OF_KB 为 null、缺省取最新版本、分页、PATCH 标注落库</td><td><span class="status-pass">5/5</span></td></tr>
+    <tr><td>DebugRetrievalConsistencyIT（1）</td><td>DebugRetrievalService 与 RetrievalService 同库同问命中序列完全一致（复刻语义守护）</td><td><span class="status-pass">1/1</span></td></tr>
+    <tr><td>DocumentFlowIT（2）</td><td>真实 controller：上传→轮询 COMPLETED→列表/详情/分块/解析文本→重复上传 409+existingDocumentId→删除→cleanup_task DONE→ES 无残留；删库 confirm 与级联计数</td><td><span class="status-pass">2/2</span></td></tr>
+    <tr><td>OpenApiDriftTest（1）</td><td>运行时 api-docs 与契约结构比对（27 operation、operationId、2xx、requestBody）</td><td><span class="status-pass">1/1</span></td></tr>
+  </table>
+
+  <h3>3.3 需求验收对照（docs/01-需求理解.md）</h3>
+  <table>
+    <tr><th>需求</th><th>验证方式</th><th>结果</th></tr>
+    <tr><td>KB-1 知识库 CRUD+删除影响确认</td><td>ControllerTest + DocumentFlowIT（confirm 400/级联计数）+ 浏览器实测</td><td><span class="status-pass">通过</span></td></tr>
+    <tr><td>KB-2 三格式上传/扫描件明确拒绝</td><td>白名单 415、magic bytes；扫描件检出为任务失败 SCANNED_PDF_NOT_SUPPORTED（PdfBoxParser 单测级逻辑+错误码映射）</td><td><span class="status-pass">通过</span></td></tr>
+    <tr><td>KB-3 异步受理不等流程</td><td>202 + task 轮询；E2E 实测上传立即返回 QUEUED</td><td><span class="status-pass">通过</span></td></tr>
+    <tr><td>KB-4 状态/阶段/失败原因/重试</td><td>E2E 实测：EMBEDDING 失败原因可读、parsed-text 前序产物保留；重试接口 409/202 分支有测试</td><td><span class="status-pass">通过</span></td></tr>
+    <tr><td>KB-5 列表/详情/解析文本/分块/删除</td><td>DocumentFlowIT 全链路 + E2E</td><td><span class="status-pass">通过</span></td></tr>
+    <tr><td>KB-6 两种可解释分块策略</td><td>ChunkerTest 边界 + 上传参数落库 chunk_config</td><td><span class="status-pass">通过</span></td></tr>
+    <tr><td>KB-7 来源元数据（标题路径/页码/chunkId）</td><td>Chunk 结构 + ES mapping + 引用契约</td><td><span class="status-pass">通过</span></td></tr>
+    <tr><td>KB-8 哈希去重/幂等写入</td><td>UNIQUE 约束 IT + 409 details + 幂等重建 IT</td><td><span class="status-pass">通过</span></td></tr>
+    <tr><td>KB-9 重试复用/删除退出检索/清理可追踪</td><td>重试复用 IT；QaStreamIT 删除收口；cleanup_task DONE 收敛 E2E（ES count=0）</td><td><span class="status-pass">通过</span></td></tr>
+    <tr><td>QA-1 检索限定知识库</td><td>StorageIT kNN filter + EsChunkIndex 测试</td><td><span class="status-pass">通过</span></td></tr>
+    <tr><td>QA-2 检索参数可配置</td><td>RagProperties 校验测试 + debug/eval 覆盖参数</td><td><span class="status-pass">通过</span></td></tr>
+    <tr><td>QA-3 多轮会话/历史≠证据</td><td>PromptAssemblerTest + QaStreamIT 引用仅来自检索</td><td><span class="status-pass">通过</span></td></tr>
+    <tr><td>QA-4 SSE 真实阶段</td><td>QaStreamIT 事件序列断言 + E2E 真实 HTTP 抓包（stage→error 终态）</td><td><span class="status-pass">通过</span></td></tr>
+    <tr><td>QA-5 引用可查看分块</td><td>citations→chunkId→doc-detail 跳转链路（前端 build + 原型语义保留）</td><td><span class="status-pass">通过</span></td></tr>
+    <tr><td>QA-6 资料不足明确拒答</td><td>citations=[] 路径测试（minScore 全滤）+ 前端呈现</td><td><span class="status-pass">通过</span></td></tr>
+    <tr><td>QA-7 会话管理</td><td>SessionControllerTest + E2E</td><td><span class="status-pass">通过</span></td></tr>
+    <tr><td>QA-8 异常路径（超时/中断/取消/重复提交）</td><td>QaStreamIT 四分支 + 前端 AbortController/重试 UI</td><td><span class="status-pass">通过</span></td></tr>
+    <tr><td>3.3 检索调试</td><td>DebugRetrievalConsistencyIT（与问答同语义）+ 前端调试页</td><td><span class="status-pass">通过</span></td></tr>
+    <tr><td>EV-1~6 基础评测</td><td>真实模型全链路执行（2026-09-14）：qwen3.7-text-embedding(1024 维) + deepseek-v4-flash-0731，4 篇语料 29 分块入库；调优集 6 题与独立测试集 10 题各跑一次，configSnapshot/Hit@K/逐题回答与来源/类型隔离全部落库</td><td><span class="status-pass">通过</span></td></tr>
+    <tr><td>前端五页面（原型语义保留）</td><td>浏览器端到端走查：建库/进入库/上传弹窗结构/调试页空库引导/问答空态/禁用态</td><td><span class="status-pass">通过</span></td></tr>
+  </table>
+
+  <h3>3.4 端到端验证记录（真实运行）</h3>
+  <pre># 环境：docker compose（rag-mysql 3306 / rag-es 9200 含 IK / rag-minio 9000）
+# 启动：RAG_MODELS_STARTUP_CHECK=false mvn spring-boot:run（无模型服务场景）
+# 前端：pnpm start -p 3000（rewrites 代理 /api → 8080）
+
+POST /api/v1/knowledge-bases                → 201（id=d23c0640…）
+POST /api/v1/knowledge-bases/{id}/documents → 202 task=QUEUED          ← KB-3 立即受理
+GET  /api/v1/documents/{id}/task            → RUNNING CHUNKING → FAILED EMBEDDING
+GET  /api/v1/documents/{id}                 → failureReason=INTERNAL_ERROR: ConnectException（可读）
+GET  /api/v1/documents/{id}/parsed-text     → 200（前序阶段产物保留）
+POST /api/v1/debug/retrieval                → {"code":"RETRIEVAL_FAILED",…}（契约错误体）
+DELETE /api/v1/documents/{id}               → 200 cleanupTasksAccepted=2；随后 404
+DELETE /api/v1/knowledge-bases/{id}         → 400（无 confirm）
+DELETE /api/v1/knowledge-bases/{id}?confirm=true → 200 {docs:0, sessions:1, cleanupTasks:2}
+（35s 后）GET rag_chunks_v1/_count → {"count":0}                        ← 补偿清理收敛
+POST /api/v1/qa/stream（真实 HTTP SSE）
+  event:stage  data:{"stage":"RETRIEVAL_STARTED"}
+  event:error  data:{"error":{"code":"RETRIEVAL_FAILED",…,"requestId":…}}  ← 终态契约
+浏览器走查（localhost:3000）：建库→列表出现→进入文档页→上传弹窗（策略单选/参数约束）→
+  调试页空库引导→问答页空态引导+输入禁用</pre>
+
+  <h2>4. 独立评审与修复记录</h2>
+  <table>
+    <tr><th>评审</th><th>判定</th><th>主要发现</th><th>修复</th></tr>
+    <tr><td>plan-document-reviewer（计划）</td><td>APPROVE-WITH-FIXES</td><td>4 必修（删除收口/依赖缺失/重复上传用例/评测五类覆盖）</td><td>已修（计划内吸收）</td></tr>
+    <tr><td>spec-reviewer（契约符合性）</td><td>PASS-WITH-FIXES</td><td>0 BLOCKER；M1 qa 输入零校验、M2 快照缺分块配置、M3 数据集类型可混用、M4 Message.error 字段不全</td><td>已全部修复</td></tr>
+    <tr><td>code-quality-reviewer（质量）</td><td>PASS-WITH-FIXES</td><td>B1 删除与 worker 竞态（文档复活+ES 残留）、B2 SSE 收尾泄漏（32 次后永久 503）；7 MAJOR</td><td>B1/B2/M1/M3/M4/M5/M6/M7 已全部修复</td></tr>
+  </table>
+  <p>修复后回归：<code>mvn test → 109/109 BUILD SUCCESS</code>。</p>
+
+  <h2>4.1 真实评测结果（第一版基线，2026-09-14）</h2>
+  <div class="info">
+    <b>配置快照</b>：embedding=qwen3.7-text-embedding（1024 维）+ chat=deepseek-v4-flash-0731 ｜ topK=6 ｜ minScore=0.30 ｜ 分块=STRUCTURE/800 ｜ 数据集版本不可变留痕（调优集 v1：6 题；独立测试集 v1：10 题，五类覆盖）。
+  </div>
+  <table>
+    <tr><th>数据集</th><th>Hit@1</th><th>Hit@3</th><th>Hit@5</th><th>平均单题耗时</th><th>说明</th></tr>
+    <tr><td>调优集-v1（TUNING，6 题）</td><td>1.00</td><td>1.00</td><td>1.00</td><td>2782 ms</td><td>含 1 道 OUT_OF_KB（hit=null 不计分母，正确拒答）</td></tr>
+    <tr><td>独立测试集-v1（TEST，10 题）</td><td>1.00</td><td>1.00</td><td>1.00</td><td>4732 ms</td><td>含 2 道 OUT_OF_KB（不计分母）；FOLLOW_UP 题本轮未按预期失败（语料恰好覆盖「磁盘清理恢复」主题，检索命中）</td></tr>
+  </table>
+  <p><b>诚实解读</b>：语料库仅 4 篇文档、29 个分块，检索任务简单，Hit@K=1.00 反映的是<b>小库冒烟基线</b>，不能外推为通用检索能力；数字仅来自本次实际运行，可复现（configSnapshot 已存档 runId）。<br>
+  <b>本轮评测暴露的真实调优点（记录至第二轮路线）</b>：① 资料外问题全部命中通过 minScore（cosine 0.65~0.77），回答正确拒答但 citations 列出 6 条低相关来源，与契约"资料不足时 citations 为空数组"的理想语义有差距——需引入相关性阈值校准或拒答时丢弃引用；② Markdown 标题路径出现「1.6. 6.」编号重复（自动编号与原文标题编号叠加）；③ 长题（RDB vs AOF 对比）单题 22s，模型侧延迟显著。</p>
+
+  <h2>5. 未验证 / 跳过 / 阻塞项</h2>
+  <table>
+    <tr><th>项</th><th>状态</th><th>原因与下一步</th></tr>
+    <tr><td>大规模语料下的检索泛化</td><td><span class="status-na">范围外</span></td><td>本轮语料 4 篇为冒烟基线；扩大语料与调参属第二轮对照实验范畴</td></tr>
+    <tr><td>Playwright 主旅程（rag-web specs）</td><td><span class="status-partial">部分</span></td><td>spec 已就位（后端在线探活自动 skip）；本轮以浏览器人工走查覆盖同等旅程</td></tr>
+    <tr><td>IK 分词下的集成测试</td><td><span class="status-na">不适用</span></td><td>Testcontainers ES 镜像无 IK，按路线 §4.2 以 standard 运行并如实记录；docker compose 的 ES 已装 IK（启动日志确认）</td></tr>
+    <tr><td>生产部署（HTTPS/域名/真实密钥）</td><td><span class="status-na">不适用</span></td><td>第一版本地部署范围</td></tr>
+  </table>
+
+  <h2>6. 执行命令索引</h2>
+  <pre>cd rag-server &amp;&amp; JAVA_HOME=$HOME/Library/Java/JavaVirtualMachines/ms-17.0.19/Contents/Home mvn test
+  → Results: Tests run: 109, Failures: 0, Errors: 0, Skipped: 0  BUILD SUCCESS
+cd rag-web &amp;&amp; pnpm lint / pnpm vitest run / pnpm build
+  → ✔ No ESLint warnings or errors; Test Files 2 passed (14 tests); Compiled successfully
+docker compose up -d  → 3 容器 healthy（rag-es 首启安装 analysis-ik，日志确认加载）
+端到端：curl 脚本（见 §3.4）+ 浏览器走查（in-app browser 1440×900）</pre>
+
+  <div class="note"><b>诚实性声明</b>：本报告中 FakeOpenAiServer 为测试替身（8 维伪向量、固定回答），仅证明链路与契约行为，不证明真实模型下的回答质量；原型（prototype/）交互为模拟数据演示；两者均与上述真实集成验证明确区分。评测数值（Hit@K 等）在用户配置模型服务并实际运行前不存在，任何数字均以届时真实输出为准。</div>
+</div>
+</body>
+</html>

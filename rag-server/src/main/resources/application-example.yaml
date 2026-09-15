@@ -1,0 +1,111 @@
+# =====================================================================
+# 本地启动示例 —— 复制为 application.yaml 或以环境变量提供同名值后再启动。
+# 启动前先在仓库根目录执行 `docker compose up -d` 拉起 MySQL / Elasticsearch / MinIO。
+# 注意：不要把真实密钥提交进仓库。
+# =====================================================================
+server:
+  port: 8080
+
+spring:
+  threads:
+    virtual:
+      enabled: false            # JDK 17 环境，不启用虚拟线程
+
+  datasource:
+    # 与 docker-compose.yml 中的 MySQL 一致（库名 rag）
+    url: jdbc:mysql://localhost:3306/rag?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true
+    username: rag
+    password: rag-pass          # 对应 compose 中 MYSQL_PASSWORD
+    hikari:
+      maximum-pool-size: 10
+
+  jpa:
+    hibernate:
+      ddl-auto: validate        # 表结构由 Flyway 管理，JPA 仅校验
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  servlet:
+    multipart:
+      max-file-size: 50MB       # 与 rag.ingestion.max-upload-size-mb 保持一致
+      max-request-size: 55MB
+
+  elasticsearch:
+    uris: http://localhost:9200
+    connection-timeout: 5s
+    socket-timeout: 30s
+
+minio:
+  endpoint: http://localhost:9000
+  access-key: minioadmin        # 对应 compose 中 MINIO_ROOT_USER
+  secret-key: minioadmin        # 对应 compose 中 MINIO_ROOT_PASSWORD
+  bucket: rag
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+rag:
+  models:
+    # true 时启动即向 embedding 服务发一次探活请求并校验返回维度（=rag.models.embedding.dimensions），
+    # 失败拒绝启动；若模型服务晚于应用启动，本地可临时置 false
+    startup-check: true
+    chat:
+      # OpenAI 兼容端点（如 vLLM/Ollama/各类网关），必填，缺失时启动期校验直接报错
+      base-url: http://localhost:8000/v1
+      # 密钥可空：本地推理服务通常不需要。生产请用环境变量 CHAT_MODEL_API_KEY 注入，勿写明文
+      api-key:
+      model-name: qwen2.5-7b-instruct
+      temperature: 0.2
+      timeout-seconds: 120      # 首 token 前与 token 间 idle 超时共用
+      max-history-messages: 8
+    embedding:
+      base-url: http://localhost:8001/v1
+      api-key:
+      model-name: bge-m3
+      dimensions: 1024          # 必须与模型实际输出维度一致，否则启动检查失败
+      timeout-seconds: 30
+  retrieval:
+    top-k: 6                    # 召回块数，≥1
+    min-score: 0.30             # 阈值，[0,1]；作用于最终排序分，低于阈值的块不进入回答与引用
+    max-context-chars: 6000     # 拼接给模型的上下文总长上限
+    # 检索模式（第二轮）：VECTOR=仅向量（第一轮基线）| HYBRID=BM25+向量 RRF 融合 | HYBRID_RERANK=融合+重排
+    # 注意：三种模式的 score 语义不同（余弦/余弦/重排相关度），切换模式后需重新校准 min-score 与拒答阈值
+    mode: HYBRID_RERANK
+    rrf:
+      k: 60                     # RRF 常数；融合分 = Σ 1/(k+rank)，仅用于排序
+      candidate-limit: 30       # 各通道候选数上限（重排成本随候选数增长）
+    rerank:
+      # DashScope 原生重排端点（注意：不是 OpenAI 兼容路径 /compatible-mode/v1，后者 404）。
+      # 留空 = 不装配重排客户端，HYBRID_RERANK 模式下自动降级为融合顺序并显式标注。
+      base-url: https://dashscope.aliyuncs.com
+      api-key:                  # 环境变量 RERANK_MODEL_API_KEY 注入，勿写明文
+      model-name: qwen3.7-text-rerank
+      timeout-seconds: 10
+      degrade-on-failure: true  # true=重排失败回退融合顺序（问答可用性优先，会标注「已降级」）
+    refusal:
+      # 证据不足即拒答并清空引用（关闭仅用于与第一轮行为对照）
+      enabled: true
+      # 双阈值口径：重排生效时用 rerank-threshold（默认模式）；降级/未启用重排时用 cosine-threshold。
+      # 余弦口径区分度弱（实测资料外题与可答题区间重叠），只能过滤明显不相关。
+      rerank-threshold: 0.65
+      cosine-threshold: 0.30
+  ingestion:
+    worker-threads: 2           # 入库流水线固定线程池大小
+    max-upload-size-mb: 50
+  elasticsearch:
+    content-analyzer: ik_max_word   # docker-compose 中的 ES 镜像已含 IK 插件；换官方镜像时改 standard
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [rid=%X{requestId}] %logger{40} - %msg%n"
+  level:
+    com.rag: INFO

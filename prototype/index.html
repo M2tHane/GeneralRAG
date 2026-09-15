@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>通用知识问答 RAG · 交互原型</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  .entry-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; background: var(--surface); }
+  .entry-card h2 { font-size: 16px; margin: 0 0 6px; }
+  .entry-card p { font-size: 14px; color: var(--muted-foreground); margin: 0 0 14px; line-height: 22px; }
+  .entry-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+  ul.demo-list { margin: 0; padding-left: 18px; font-size: 13px; color: var(--muted-foreground); line-height: 22px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="sidebar-scrim" id="sidebar-scrim"></div>
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" id="menu-btn" aria-label="打开导航">☰</button>
+      <div class="crumb"><b>原型首页</b></div>
+    </header>
+    <main class="content">
+      <div class="content-inner">
+        <div class="page-header">
+          <div>
+            <h1>通用知识问答 RAG · 交互原型</h1>
+            <div class="sub">覆盖「文档入库 → 检索 → 回答 → 来源追溯 → 检索调试」的模拟演示。全部数据为模拟数据，未连接真实后端。</div>
+          </div>
+        </div>
+
+        <div class="entry-grid">
+          <div class="entry-card">
+            <h2>1. 知识库与文档管理</h2>
+            <p>知识库列表，进入单个知识库管理文档：上传、处理阶段、失败原因与重试、删除。</p>
+            <ul class="demo-list">
+              <li>创建 / 重命名 / 删除知识库（删除确认会列出影响范围）</li>
+              <li>上传 MD / TXT / 文本型 PDF；扫描件 PDF 会明确提示暂不支持</li>
+              <li>上传后任务异步推进：排队 → 解析 → 清洗 → 分块 → 向量化 → 入库</li>
+              <li>重复上传相同文件有去重提示；失败任务可重试</li>
+            </ul>
+            <div class="form-actions" style="justify-content:flex-start">
+              <a class="btn btn-primary" href="kb.html">进入知识库</a>
+            </div>
+          </div>
+
+          <div class="entry-card">
+            <h2>2. 文档详情 · 解析与分块</h2>
+            <p>从「知识库 → 文档列表 → 文档名称」进入。展示解析文本预览、分块列表（标题路径 / 页码 / 内容）与基本信息。</p>
+            <ul class="demo-list">
+              <li>推荐先看：支付网关服务架构说明.md（已完成）</li>
+              <li>统一鉴权服务接口文档.pdf（向量化失败，可演示重试）</li>
+            </ul>
+          </div>
+
+          <div class="entry-card">
+            <h2>3. 知识问答</h2>
+            <p>选择知识库后提问，SSE 阶段实时展示，回答附带可点开的来源引用；多轮会话可新建 / 切换 / 删除。</p>
+            <ul class="demo-list">
+              <li>试试：支付回调超时一般怎么排查？（正常回答 + 引用）</li>
+              <li>试试：年假有几天？（资料外问题，明确无法回答且不伪造引用）</li>
+              <li>侧栏「原型演示控制」可模拟超时 / 中断 / 重复提交</li>
+            </ul>
+            <div class="form-actions" style="justify-content:flex-start">
+              <a class="btn btn-primary" href="chat.html">进入问答</a>
+            </div>
+          </div>
+
+          <div class="entry-card">
+            <h2>4. 检索调试</h2>
+            <p>查看生效检索配置、命中分块与排名分数、各阶段耗时、实际送入模型的上下文与未召回线索。</p>
+            <ul class="demo-list">
+              <li>与问答页使用同一份模拟检索数据，结果一致</li>
+              <li>试试：年假有几天？（演示未召回）</li>
+            </ul>
+            <div class="form-actions" style="justify-content:flex-start">
+              <a class="btn btn-primary" href="debug.html">进入检索调试</a>
+            </div>
+          </div>
+
+          <div class="entry-card">
+            <h2>5. 效果评测</h2>
+            <p>评测运行列表、两次运行对比、逐题下钻与 BadCase 归因汇总。评测结果按分块级判定，指标可比较。</p>
+            <ul class="demo-list">
+              <li>运行列表：查看每次运行的检索配置与指标摘要</li>
+              <li>两次运行对比：「混合检索 + 重排」对比基线，看指标 delta 与逐题变好 / 变差计数</li>
+              <li>逐题下钻：分阶段排名（向量 / BM25 / 融合 / 重排）与两轮回答并排</li>
+              <li>归因汇总：按未召回 / 排名下降 / 被阈值卡掉等类型筛选并标记已处理</li>
+              <li>不可比运行会被可比性守卫拦下（数据集版本或语料指纹不同）</li>
+            </ul>
+            <div class="form-actions" style="justify-content:flex-start">
+              <a class="btn btn-primary" href="eval.html">进入效果评测</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-24 muted" style="line-height:22px">
+          提示：左侧栏底部「原型演示控制」为演示专用开关（模拟加载 / 空数据 / 异常），不属于业务界面；主题切换也在左侧栏底部，支持浅色 / 深色 / 跟随系统。「检索调试」与「效果评测」共用同一份模拟检索数据；资料外问题的拒答与引用清空语义、标题路径编号修复均在第二轮生效。
+        </div>
+        <div style="height:32px"></div>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="ui.js"></script>
+<script src="data.js"></script>
+<script>SupieUI.initShell(null);</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+name: auto
+match:
+  strategy: detect-from-repository
+policy:
+  prefer_existing_stack: true
+  do_not_force_framework: true
+  do_not_force_database: true
+  do_not_force_package_manager: true
+contract:
+  api: contracts/openapi.yaml
+  format: openapi-3.1
+notes:
+  - Detect build files, lockfiles, framework markers, migrations and existing test tooling before choosing commands.
+  - If the repository is established, existing project conventions override all example profiles.

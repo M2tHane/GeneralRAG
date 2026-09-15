@@ -1,0 +1,25 @@
+# =====================================================================
+# 存储层集成测试（StorageIT）专用配置。
+#   * ES 用官方 elasticsearch:8.14.1（无 IK 插件）→ 分析器用 standard；
+#   * 向量维度用 8（便于手写测试向量）；其余容器地址经 @DynamicPropertySource 注入；
+#   * 模型 base-url 仅满足 @NotBlank 校验，测试不调用真实模型服务。
+# =====================================================================
+rag:
+  models:
+    startup-check: false
+    chat:
+      base-url: http://localhost:0
+    embedding:
+      base-url: http://localhost:0
+      dimensions: 8
+  elasticsearch:
+    content-analyzer: standard
+
+spring:
+  elasticsearch:
+    connection-timeout: 5s
+    socket-timeout: 30s
+
+logging:
+  level:
+    com.rag: INFO

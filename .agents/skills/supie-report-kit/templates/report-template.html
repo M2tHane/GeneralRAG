@@ -1,0 +1,366 @@
+<!doctype html>
+<!-- Development verification report template.
+Copy to docs/06-测试报告.html for supie-dev Stage 6, or an explicitly requested
+report path for supie-edit / supie-fix. Replace every sample result with actual
+command/browser evidence; list unverified gaps. Do not present examples as results.
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>测试报告 · &lt;项目或改动名称&gt;</title>
+<style> 里已内联整套 report.css(封面/目录/KPI/表格/徽章/问题卡;屏幕+打印两用)。改样式改这里。
+  状态徽章:审计 / UI 走查 / 评审用 .badge.priority-P0..P3;测试用 .badge.status-pass / -partial / -fail / -todo / -na。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>supie 报告 · &lt;改成 审计 / 测试 / UI 走查 / 评审 + 项目名&gt;</title>
+  <style>
+/* supie-report-kit: development verification report; screen and print styles. */
+
+@page {
+  size: A4;
+  margin: 14mm 12mm 16mm 12mm;
+  @top-left {
+    content: "supie 工作流 · 报告";
+    font-size: 9pt; color: #475569;
+    font-family: 'Noto Sans CJK SC', 'Noto Serif CJK SC', sans-serif;
+  }
+  @top-right {
+    content: none;
+    font-size: 9pt; color: #475569;
+    font-family: 'Noto Sans CJK SC', 'Noto Serif CJK SC', sans-serif;
+  }
+  @bottom-center {
+    content: "第 " counter(page) " / " counter(pages) " 页";
+    font-size: 9pt; color: #64748b;
+    font-family: 'Noto Sans CJK SC', 'Noto Serif CJK SC', sans-serif;
+  }
+  @bottom-right {
+    content: "内部 · 请勿外传";
+    font-size: 9pt; color: #94a3b8;
+    font-family: 'Noto Sans CJK SC', 'Noto Serif CJK SC', sans-serif;
+  }
+}
+
+@page cover {
+  margin: 0;
+  @top-left { content: none; }
+  @top-right { content: none; }
+  @bottom-center { content: none; }
+  @bottom-right { content: none; }
+}
+
+@page :first { page: cover; }
+
+/* 屏幕浏览态:把 HTML 渲成居中的「文档纸张」(上面的 @page 仅打印生效)。
+   让 HTML 报告在浏览器里也是一张干净的 A4 宽文档,与打印 / PDF 同一套视觉。 */
+@media screen {
+  html { background: #e5e7eb; }
+  body {
+    max-width: 210mm;
+    margin: 18px auto;
+    background: #ffffff;
+    box-shadow: 0 2px 18px rgba(15, 23, 42, 0.18);
+  }
+  /* 屏幕上补回页边距(打印时由 @page margin 负责)*/
+  section.major, .toc { padding-left: 14mm; padding-right: 14mm; }
+  section.major:last-child { padding-bottom: 16mm; }
+  .toc { padding-top: 10mm; }
+  /* 目录页码是分页媒体专用,屏幕上隐藏,避免空的点线 */
+  .toc-list .toc-page { display: none; }
+  .toc-list .toc-leader { margin-right: 0; }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0;
+  font-family: 'Noto Sans CJK SC', 'Noto Serif CJK SC', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  color: #0f172a;
+  font-size: 10.5pt;
+  line-height: 1.65;
+  background: #ffffff;
+}
+
+body { counter-reset: section subsection; }
+
+.cover {
+  page: cover;
+  page-break-after: always;
+  width: 100%;
+  min-height: 297mm;
+  padding: 26mm 22mm 16mm 22mm;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(255,255,255,0.18), transparent 38%),
+    linear-gradient(135deg, #0b1e3b 0%, #16365c 55%, #1e4a7a 100%);
+  color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+}
+
+.cover .cover-brand {
+  display: flex; align-items: center; gap: 12pt;
+  letter-spacing: 1pt; font-size: 12pt;
+  color: rgba(248, 250, 252, 0.85);
+}
+.cover .cover-brand .dot {
+  display: inline-block; width: 9pt; height: 9pt;
+  background: #38bdf8; border-radius: 50%;
+}
+
+.cover .cover-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64mm;
+  gap: 16mm; align-items: center; margin-top: 24mm;
+}
+.cover .cover-headline { min-width: 0; }
+.cover .cover-title {
+  margin: 0; font-size: 27pt; font-weight: 700;
+  letter-spacing: 1pt; line-height: 1.22; overflow-wrap: anywhere;
+}
+.cover .cover-sub {
+  margin-top: 7mm; font-size: 12pt;
+  color: rgba(248, 250, 252, 0.78); letter-spacing: 0.5pt; overflow-wrap: anywhere;
+}
+.cover .cover-band {
+  margin-top: 10mm; display: inline-block;
+  padding: 6pt 14pt; border-radius: 999pt;
+  font-size: 11pt; font-weight: 700; letter-spacing: 0.5pt;
+}
+.cover .cover-band.sev-CRITICAL { background: #7f1d1d; color: #fee2e2; }
+.cover .cover-band.sev-HIGH { background: #b91c1c; color: #fee2e2; }
+.cover .cover-band.sev-MEDIUM { background: #c2410c; color: #ffedd5; }
+.cover .cover-band.sev-LOW { background: #15803d; color: #dcfce7; }
+.cover .cover-band.sev-SAFE { background: #0f766e; color: #ccfbf1; }
+
+.cover .cover-score {
+  width: 64mm; height: 64mm; border-radius: 50%;
+  background: rgba(255,255,255,0.08);
+  border: 1.5pt solid rgba(255,255,255,0.45);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+}
+.cover .cover-score .label { font-size: 10pt; letter-spacing: 1pt; color: rgba(248, 250, 252, 0.7); }
+.cover .cover-score .value { font-size: 40pt; font-weight: 800; letter-spacing: 1pt; }
+.cover .cover-score .band { font-size: 11pt; color: rgba(255,255,255,0.9); margin-top: 4pt; }
+
+.cover .cover-meta {
+  display: grid; grid-template-columns: repeat(2, 1fr);
+  gap: 6pt 18pt; margin: 18mm 0 0 0;
+  font-size: 9.5pt; color: rgba(248, 250, 252, 0.85);
+}
+.cover .cover-meta dt {
+  font-weight: 600; color: rgba(248, 250, 252, 0.6);
+  letter-spacing: 0.5pt; margin-bottom: 2pt;
+}
+.cover .cover-meta dd { margin: 0; font-size: 10.2pt; line-height: 1.35; overflow-wrap: anywhere; }
+.cover .cover-footer {
+  display: flex; justify-content: space-between; margin-top: auto;
+  font-size: 9pt; color: rgba(248, 250, 252, 0.55); letter-spacing: 0.5pt;
+}
+
+/* TOC */
+.toc { margin: 0 0 12pt 0; }
+.toc h1 { font-size: 18pt; margin: 0 0 8pt 0; border-bottom: 2pt solid #0f172a; padding-bottom: 4pt; }
+.toc-list { list-style: none; padding: 0; margin: 8pt 0 0 0; }
+.toc-list li {
+  display: flex; align-items: baseline; margin: 3pt 0;
+  font-size: 10pt; border-bottom: 1pt dotted #cbd5e1; padding-bottom: 1pt;
+}
+.toc-list .toc-title { flex: 0 0 auto; }
+.toc-list .toc-leader { flex: 1; margin: 0 6pt; border-bottom: 1pt dotted transparent; }
+.toc-list .toc-page::before { content: target-counter(attr(href), page); }
+
+/* generic */
+section.major { page-break-before: auto; margin-top: 14pt; }
+h1.section-title {
+  counter-increment: section; counter-reset: subsection;
+  font-size: 17pt; margin: 0 0 9pt 0; padding-bottom: 4pt;
+  border-bottom: 2pt solid #0f172a; letter-spacing: 0.5pt; page-break-after: avoid;
+}
+h1.section-title::before { content: counter(section) ". "; color: #1e3a8a; }
+h2.subsection-title {
+  counter-increment: subsection; font-size: 12.5pt;
+  margin: 12pt 0 6pt 0; color: #0f172a; page-break-after: avoid;
+}
+h2.subsection-title::before { content: counter(section) "." counter(subsection) " "; color: #1e3a8a; }
+h3 { font-size: 11pt; margin: 10pt 0 4pt; color: #0f172a; page-break-after: avoid; }
+p { margin: 4pt 0; }
+.muted { color: #64748b; }
+.section-lead {
+  background: #f1f5f9; border-left: 3pt solid #1e3a8a;
+  padding: 6pt 9pt; margin: 7pt 0 9pt 0; font-size: 10pt; line-height: 1.55;
+}
+
+/* KPI tiles */
+.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6pt; margin: 8pt 0; }
+.kpi-tile { border: 1pt solid #e2e8f0; border-radius: 6pt; padding: 7pt 9pt; background: #f8fafc; }
+.kpi-tile .label { font-size: 9pt; color: #475569; letter-spacing: 0.5pt; }
+.kpi-tile .value { font-size: 18pt; font-weight: 700; color: #0f172a; line-height: 1.2; margin-top: 4pt; }
+.kpi-tile .hint { font-size: 8.5pt; color: #94a3b8; margin-top: 2pt; }
+.kpi-tile.accent { background: #1e3a8a; color: #f8fafc; }
+.kpi-tile.accent .label { color: rgba(248,250,252,0.7); }
+.kpi-tile.accent .value { color: #ffffff; }
+.kpi-tile.accent .hint { color: rgba(248,250,252,0.7); }
+
+/* tables */
+table.kv { width: 100%; border-collapse: collapse; margin: 5pt 0; font-size: 9.5pt; }
+table.kv th, table.kv td { text-align: left; vertical-align: top; padding: 4pt 6pt; border-bottom: 1pt solid #e2e8f0; }
+table.kv th { width: 28%; background: #f1f5f9; font-weight: 600; color: #1e293b; }
+table.kv td { color: #0f172a; word-break: break-all; }
+
+table.data { width: 100%; border-collapse: collapse; font-size: 9pt; margin: 5pt 0; }
+table.data th, table.data td { text-align: left; padding: 4pt 6pt; border: 1pt solid #e2e8f0; vertical-align: top; word-break: break-all; }
+table.data th { background: #1e3a8a; color: #f8fafc; font-weight: 600; letter-spacing: 0.5pt; }
+table.data tr:nth-child(even) td { background: #f8fafc; }
+table.data td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* badges */
+.badge { display: inline-block; padding: 2pt 8pt; border-radius: 999pt; font-size: 9pt; font-weight: 600; letter-spacing: 0.5pt; color: #ffffff; line-height: 1.3; }
+.badge.priority-P0 { background: #7f1d1d; }
+.badge.priority-P1 { background: #b91c1c; }
+.badge.priority-P2 { background: #c2410c; }
+.badge.priority-P3 { background: #475569; }
+/* 测试状态徽章(通过/部分/失败/未做/无法验证)*/
+.badge.status-pass { background: #15803d; }
+.badge.status-partial { background: #c2410c; }
+.badge.status-fail { background: #b91c1c; }
+.badge.status-todo { background: #475569; }
+.badge.status-na { background: #94a3b8; }
+.tag { display: inline-block; background: #e2e8f0; color: #1e293b; font-size: 9pt; padding: 2pt 8pt; border-radius: 4pt; margin-right: 4pt; }
+
+/* issue card */
+.issue-card {
+  border: 1pt solid #e2e8f0; border-left: 4pt solid #94a3b8; border-radius: 6pt;
+  margin: 7pt 0; padding: 8pt 10pt; break-inside: auto; background: #ffffff;
+}
+.issue-card.priority-P0 { border-left-color: #7f1d1d; }
+.issue-card.priority-P1 { border-left-color: #b91c1c; }
+.issue-card.priority-P2 { border-left-color: #c2410c; }
+.issue-card.priority-P3 { border-left-color: #475569; }
+.issue-card.status-pass { border-left-color: #15803d; }
+.issue-card.status-partial { border-left-color: #c2410c; }
+.issue-card.status-fail { border-left-color: #b91c1c; }
+.issue-card.status-todo { border-left-color: #475569; }
+.issue-card.status-na { border-left-color: #94a3b8; }
+.issue-card .issue-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12pt; }
+.issue-card .issue-id { color: #64748b; font-size: 9pt; letter-spacing: 0.5pt; }
+.issue-card h4 { font-size: 12pt; margin: 0 0 4pt 0; color: #0f172a; line-height: 1.4; flex: 1; }
+.issue-card .issue-meta { display: flex; flex-wrap: wrap; gap: 6pt 10pt; font-size: 9.5pt; color: #475569; margin-top: 4pt; }
+.issue-card .issue-meta .meta-label { color: #94a3b8; margin-right: 3pt; }
+.issue-card .issue-section { margin-top: 8pt; }
+.issue-card .issue-section .label { font-size: 9pt; font-weight: 600; color: #1e3a8a; letter-spacing: 0.5pt; margin-bottom: 3pt; }
+.issue-card .issue-section .body { font-size: 10pt; line-height: 1.7; color: #1e293b; }
+
+pre.code {
+  white-space: pre-wrap; word-break: break-all;
+  background: #0f172a; color: #e2e8f0; border-radius: 5pt; padding: 8pt 10pt;
+  font-family: 'Cascadia Mono', 'Consolas', 'Noto Sans Mono CJK SC', monospace;
+  font-size: 9pt; line-height: 1.55; max-height: 32em; overflow: hidden;
+}
+pre.code.dim { background: #f8fafc; color: #1e293b; }
+
+ul.tight, ol.tight { margin: 4pt 0 4pt 18pt; padding: 0; }
+ul.tight li, ol.tight li { margin: 3pt 0; font-size: 10pt; line-height: 1.6; }
+.footnote { font-size: 9pt; color: #94a3b8; margin-top: 6pt; }
+  </style>
+</head>
+<body>
+<main id="report-test">
+  <section class="cover">
+    <div class="cover-brand"><span class="dot"></span>supie · 测试</div>
+    <div class="cover-main">
+      <div class="cover-headline">
+        <div class="cover-title">测试报告</div>
+        <div class="cover-sub">&lt;被测对象 / 本次改动&gt;</div>
+        <!-- 总体:通过=sev-SAFE / 无法验证=sev-MEDIUM / 有失败=sev-HIGH -->
+        <span class="cover-band sev-HIGH">总体结论：失败</span>
+      </div>
+      <div class="cover-score"><div class="label">通过 / 用例</div><div class="value">3/4</div><div class="band">失败 1 无法验证 0</div></div>
+    </div>
+    <dl class="cover-meta">
+      <div><dt>报告编号</dt><dd>TEST-&lt;主题&gt;-&lt;YYYYMMDD-HHMM&gt;</dd></div>
+      <div><dt>被测对象</dt><dd>&lt;功能 / 改动&gt;</dd></div>
+      <div><dt>来源流程</dt><dd>supie-dev Stage 6 / supie-edit / supie-fix</dd></div>
+      <div><dt>生成时间</dt><dd>YYYY-MM-DD HH:MM</dd></div>
+      <div><dt>证据口径</dt><dd>实跑观察(非「套件存在即通过」)</dd></div>
+    </dl>
+    <div class="cover-footer"><span>本报告由 supie- 测试环节生成</span><span>© YYYY · 内部</span></div>
+  </section>
+
+  <section class="toc"><h1>目录</h1><ol class="toc-list">
+    <li><span class="toc-title"><a href="#t-summary" style="color:#0f172a;text-decoration:none;">一、测试摘要</a></span><span class="toc-leader"></span><span class="toc-page"></span></li>
+    <li><span class="toc-title"><a href="#t-cases" style="color:#0f172a;text-decoration:none;">二、用例清单与结果</a></span><span class="toc-leader"></span><span class="toc-page"></span></li>
+    <li><span class="toc-title"><a href="#t-trace" style="color:#0f172a;text-decoration:none;">三、溯源矩阵(需求←用例)</a></span><span class="toc-leader"></span><span class="toc-page"></span></li>
+    <li><span class="toc-title"><a href="#t-regression" style="color:#0f172a;text-decoration:none;">四、就近回归</a></span><span class="toc-leader"></span><span class="toc-page"></span></li>
+    <li><span class="toc-title"><a href="#t-failures" style="color:#0f172a;text-decoration:none;">五、失败项详情</a></span><span class="toc-leader"></span><span class="toc-page"></span></li>
+    <li><span class="toc-title"><a href="#t-automation" style="color:#0f172a;text-decoration:none;">六、自动化测试结果</a></span><span class="toc-leader"></span><span class="toc-page"></span></li>
+  </ol></section>
+
+  <section class="major" id="t-summary">
+    <h1 class="section-title">测试摘要</h1>
+    <p class="section-lead">&lt;一段话:目标验证 N 条通过 X 失败 Y;就近回归是否受影响;失败概述&gt;</p>
+    <div class="kpi-grid">
+      <div class="kpi-tile accent"><div class="label">用例总数</div><div class="value">4</div><div class="hint">目标验证</div></div>
+      <div class="kpi-tile"><div class="label">通过</div><div class="value">3</div></div>
+      <div class="kpi-tile"><div class="label">失败</div><div class="value">1</div></div>
+      <div class="kpi-tile"><div class="label">无法验证</div><div class="value">0</div></div>
+    </div>
+  </section>
+
+  <section class="major" id="t-cases">
+    <h1 class="section-title">用例清单与结果</h1>
+    <table class="data">
+      <thead><tr><th style="width:7%">用例ID</th><th>用例 / 目标</th><th style="width:14%">覆盖(需求/端点)</th><th style="width:9%">角色</th><th>操作 / 输入</th><th>期望</th><th>实际</th><th style="width:8%">状态</th><th style="width:14%">测试文件</th></tr></thead>
+      <tbody>
+        <!-- 每条用例复制本行;状态徽章:status-pass/partial/fail/todo/na -->
+        <tr><td>T-1</td><td>单标签筛选</td><td>R3 / GET /api/todos</td><td>普通用户</td><td>点选标签『工作』</td><td>仅显示该标签待办</td><td>正确过滤</td><td><span class="badge status-pass">通过</span></td><td>backend/tests/test_filter.py</td></tr>
+        <tr><td>T-3</td><td>多标签 AND 组合</td><td>R3 / GET /api/todos</td><td>普通用户</td><td>同时选『工作』+『紧急』</td><td>取交集</td><td>返回并集(OR)</td><td><span class="badge status-fail">失败</span></td><td>backend/tests/test_filter.py</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="major" id="t-trace">
+    <h1 class="section-title">溯源矩阵(需求 ← 用例)</h1>
+    <p class="section-lead">每条相关需求 / 验收标准由哪些用例覆盖;无对应用例的要补或写明原因。</p>
+    <table class="data">
+      <thead><tr><th style="width:18%">需求 / 验收标准</th><th>覆盖用例</th><th style="width:12%">状态</th></tr></thead>
+      <tbody>
+        <tr><td>R3 按标签筛选</td><td>T-1, T-2, T-3</td><td><span class="badge status-fail">有失败</span></td></tr><!-- 示例行 -->
+      </tbody>
+    </table>
+  </section>
+
+  <section class="major" id="t-regression">
+    <h1 class="section-title">就近回归</h1>
+    <p class="section-lead">仅检查被改区域相邻、本不该受影响的行为(不做全量回归)。</p>
+    <table class="data">
+      <thead><tr><th style="width:30%">相邻行为</th><th>结果</th></tr></thead>
+      <tbody><tr><td>分页</td><td>翻页正常,筛选与分页可叠加</td></tr><!-- 示例行 --></tbody>
+    </table>
+  </section>
+
+  <section class="major" id="t-failures">
+    <h1 class="section-title">失败项详情</h1>
+    <!-- 无失败就删掉卡片、写「无失败项」 -->
+    <article class="issue-card status-fail">
+      <div class="issue-head"><h4><span class="issue-id">T-3</span> · 多标签 AND 组合筛选结果错误</h4><span class="badge status-fail">失败</span></div>
+      <div class="issue-section"><div class="label">复现步骤</div><div class="body">登录 → 清单页 → 同时勾选『工作』『紧急』</div></div>
+      <div class="issue-section"><div class="label">实际现象</div><div class="body">期望取交集,实际返回并集,多出不该出现的项</div></div>
+      <div class="issue-section"><div class="label">报错日志 / 线索</div><pre class="code">后端 SQL: WHERE tag IN ('work','urgent')  # 应为 AND 双 EXISTS,误用 IN 致 OR 语义</pre></div>
+    </article>
+  </section>
+
+  <section class="major" id="t-automation">
+    <h1 class="section-title">自动化测试结果</h1>
+    <table class="kv">
+      <tr><th>命令</th><td><code>&lt;actual project test command(s)&gt;</code></td></tr>
+      <tr><th>通过</th><td>7</td></tr>
+      <tr><th>失败</th><td>1</td></tr>
+      <tr><th>备注</th><td>&lt;最后一次运行输出摘要,粘真实输出&gt;</td></tr>
+    </table>
+    <p class="footnote">证据为「跑真实构建后观察到的现象」,非「套件应该通过」。失败 / 无法验证项按家族纪律回到修复循环。</p>
+  </section>
+</main>
+</body>
+</html>

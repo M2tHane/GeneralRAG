@@ -1,0 +1,1497 @@
+# contracts/openapi.yaml — 通用知识问答 RAG（第一版）API 契约
+# Stage 3 交付物；批准后为 HTTP 边界唯一事实源。
+# 后端以 springdoc 实现并与本文件做漂移检查；前端用 openapi-typescript 生成本文件的类型。
+
+openapi: 3.1.0
+info:
+  title: 通用知识问答 RAG API
+  version: 1.0.0
+  description: |
+    第一版 API。单用户、单工作空间、多知识库，无登录（本地/可信内网部署假设）。
+
+    约定：
+    - 所有路径前缀 /api/v1。
+    - 统一错误体 Error{code,message,requestId,details?}；稳定错误码枚举见 Error schema。
+    - 问答流式接口 POST /qa/stream 返回 text/event-stream，事件载荷见 QAStreamEvent oneOf。
+    - SSE 事件类型：stage / token / citations / done / error / canceled；
+      citations 恒在 done 之前；done / error / canceled 互斥且为终态。
+    - 跨存储（MySQL/ES/MinIO）删除为最终一致：响应中的统计为 MySQL 侧即时结果，
+      ES/MinIO 清理由服务端补偿任务异步完成（可追踪、可重试）。
+servers:
+  - url: http://localhost:8080
+    description: 本地开发（生产按部署环境替换）
+tags:
+  - { name: knowledge-bases, description: 知识库管理 }
+  - { name: documents, description: 文档与入库流水线 }
+  - { name: sessions, description: 会话管理 }
+  - { name: qa, description: 知识问答（SSE 流式） }
+  - { name: debug, description: 检索调试 }
+  - { name: eval, description: 基础评测 }
+
+paths:
+  # ---------------- 知识库 ----------------
+  /api/v1/knowledge-bases:
+    get:
+      tags: [knowledge-bases]
+      operationId: listKnowledgeBases
+      summary: 知识库列表（第一版数量小，不分页）
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/KnowledgeBase" }
+        "500": { $ref: "#/components/responses/ServerError" }
+    post:
+      tags: [knowledge-bases]
+      operationId: createKnowledgeBase
+      summary: 创建知识库
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KnowledgeBaseCreate" }
+      responses:
+        "201":
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KnowledgeBase" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409":
+          description: 名称重复（KB_NAME_DUPLICATED）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/v1/knowledge-bases/{kbId}:
+    parameters:
+      - $ref: "#/components/parameters/KbId"
+    get:
+      tags: [knowledge-bases]
+      operationId: getKnowledgeBase
+      summary: 知识库详情
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KnowledgeBase" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/ServerError" }
+    patch:
+      tags: [knowledge-bases]
+      operationId: updateKnowledgeBase
+      summary: 重命名 / 修改描述（部分更新，仅提交需变更字段）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KnowledgeBaseUpdate" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KnowledgeBase" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: 名称重复（KB_NAME_DUPLICATED）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/ServerError" }
+    delete:
+      tags: [knowledge-bases]
+      operationId: deleteKnowledgeBase
+      summary: 删除知识库（需显式确认）
+      description: |
+        采用 `?confirm=true` 查询参数显式确认：未携带 confirm=true 返回 400 CONFIRMATION_REQUIRED。
+        级联影响：知识库下文档、ES 分块与向量、会话与消息全部删除；ES/MinIO 清理异步补偿执行，
+        响应中的统计为 MySQL 侧即时结果。
+      parameters:
+        - name: confirm
+          in: query
+          required: true
+          schema: { type: boolean, enum: [true] }
+          description: 必须显式传 true 才执行删除
+      responses:
+        "200":
+          description: 删除已受理，返回影响范围
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeletionSummary" }
+        "400":
+          description: 未确认（CONFIRMATION_REQUIRED）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  # ---------------- 文档 ----------------
+  /api/v1/knowledge-bases/{kbId}/documents:
+    parameters:
+      - $ref: "#/components/parameters/KbId"
+    get:
+      tags: [documents]
+      operationId: listDocuments
+      summary: 文档列表（状态筛选 + 分页）
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/DocumentStatus" }
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentPage" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/ServerError" }
+    post:
+      tags: [documents]
+      operationId: uploadDocument
+      summary: 上传文档（multipart，立即返回任务受理）
+      description: |
+        返回 202 表示已受理并进入异步流水线（解析→清洗→分块→向量化→入库），进度经
+        GET /documents/{docId}/task 轮询。文件名不参与对象键与服务端路径。
+        扫描件 PDF 在解析阶段检出并以任务失败形式呈现（failureReason=SCANNED_PDF_NOT_SUPPORTED），
+        接口本身仍受理，避免同步解析样本拖慢响应。
+        PDF 解析器可配置（rag.ingestion.pdf-parser）：默认 pdfbox（仅文本层）；配置为 mineru 时
+        调远端 mineru-api 服务解析复杂版面/扫描件（OCR），服务不可达时任务失败
+        （failureReason=PARSER_UNAVAILABLE，502），不静默回退。
+        多版本语义（R3-P3）：KB 内同名同类型且内容不同 → 作为该文档组的新版本并自动激活
+        （激活切换在上传受理时发生，入库期间旧版本仍可检索）；同内容 → 409（不论版本组）。
+        删除激活版本时组内自动回落激活最新的 COMPLETED 旧版。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: >-
+                    支持 .pdf / .md / .txt / .docx / .xlsx / .csv（R3-P1 扩展
+                    docx/xlsx/csv）；≤50MB。docx/xlsx 须为 OOXML ZIP 容器
+                    （旧版 .doc/.xls 二进制格式不支持）；csv 须为 UTF-8 文本。
+                chunkStrategy:
+                  $ref: "#/components/schemas/ChunkStrategy"
+                maxLength:
+                  type: integer
+                  minimum: 200
+                  maximum: 4000
+                  default: 800
+                  description: 单块最大字符数（两种策略都生效）
+                overlap:
+                  type: integer
+                  minimum: 0
+                  maximum: 500
+                  default: 100
+                  description: 相邻块重叠字符数
+      responses:
+        "202":
+          description: 已受理
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UploadAccepted" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: |
+            DUPLICATE_DOCUMENT：同知识库内已存在相同内容哈希的文档；
+            details 中返回 existingDocumentId。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "415":
+          description: UNSUPPORTED_FILE_TYPE（扩展名/魔数不在白名单）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413":
+          description: FILE_TOO_LARGE
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/v1/documents/{docId}:
+    parameters:
+      - $ref: "#/components/parameters/DocId"
+    get:
+      tags: [documents]
+      operationId: getDocument
+      summary: 文档详情（含当前阶段与失败信息）
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentDetail" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/ServerError" }
+    delete:
+      tags: [documents]
+      operationId: deleteDocument
+      summary: 删除文档
+      description: 文档立即从 MySQL 移除并退出检索边界；ES 分块与 MinIO 对象由补偿任务异步清理。
+      responses:
+        "200":
+          description: 删除已受理
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentDeletionResult" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/v1/documents/{docId}/parsed-text:
+    parameters:
+      - $ref: "#/components/parameters/DocId"
+    get:
+      tags: [documents]
+      operationId: getDocumentParsedText
+      summary: 解析文本预览（清洗后全文）
+      parameters:
+        - name: maxChars
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1000, maximum: 500000 }
+          description: 截断返回前 N 字符；缺省返回全文
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ParsedText" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: PARSED_TEXT_NOT_READY（解析阶段未完成）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/v1/documents/{docId}/chunks:
+    parameters:
+      - $ref: "#/components/parameters/DocId"
+    get:
+      tags: [documents]
+      operationId: listDocumentChunks
+      summary: 分块预览（分页；分块正文唯一存于 ES）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: OK（尚未分块完成时返回空页，不报错）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChunkPage" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/v1/documents/{docId}/task:
+    parameters:
+      - $ref: "#/components/parameters/DocId"
+    get:
+      tags: [documents]
+      operationId: getDocumentTask
+      summary: 当前入库任务（状态/阶段/失败原因/尝试次数）
+      description: |
+        任务详情以此端点为准（上传 202 响应已含 task 句柄，文档列表行轮询此端点）；
+        DocumentDetail 内嵌 task 摘要仅为详情页便利，不承载额外字段。
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngestionTask" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/v1/documents/{docId}/retry:
+    parameters:
+      - $ref: "#/components/parameters/DocId"
+    post:
+      tags: [documents]
+      operationId: retryDocumentIngestion
+      summary: 重试失败的入库任务（复用已完成阶段）
+      responses:
+        "202":
+          description: 已重新入队
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngestionTask" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: TASK_NOT_RETRYABLE（任务处于 QUEUED/RUNNING/COMPLETED，不可重试）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/v1/documents/{docId}/versions:
+    parameters:
+      - $ref: "#/components/parameters/DocId"
+    get:
+      tags: [documents]
+      operationId: listDocumentVersions
+      summary: 版本组列表（版本号升序）（R3-P3）
+      description: |
+        返回 docId 所属版本组的全部版本。同名不同内容再上传形成新版本并自动激活；
+        同内容再上传始终 409 DUPLICATE_DOCUMENT（不论版本组）。
+      responses:
+        "200":
+          description: 版本列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Document" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/v1/documents/{docId}/activate:
+    parameters:
+      - $ref: "#/components/parameters/DocId"
+    post:
+      tags: [documents]
+      operationId: activateDocumentVersion
+      summary: 激活指定版本（组内其它版本自动失活）（R3-P3）
+      description: |
+        检索只命中激活版本。仅 COMPLETED/FAILED 版本可激活（QUEUED/PROCESSING 中间态
+        拒绝，400 INVALID_ARGUMENT）；FAILED 版本激活用于从失败的新版本回退旧版语义。
+      responses:
+        "200":
+          description: 激活后的目标版本
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Document" }
+        "400":
+          description: INVALID_ARGUMENT（版本处于 QUEUED/PROCESSING）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  # ---------------- 会话 ----------------
+  /api/v1/sessions:
+    get:
+      tags: [sessions]
+      operationId: listSessions
+      summary: 会话列表（可按知识库过滤）
+      parameters:
+        - name: kbId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Session" }
+        "500": { $ref: "#/components/responses/ServerError" }
+    post:
+      tags: [sessions]
+      operationId: createSession
+      summary: 新建会话
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SessionCreate" }
+      responses:
+        "201":
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404":
+          description: KB_NOT_FOUND
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/v1/sessions/{sessionId}:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+    get:
+      tags: [sessions]
+      operationId: getSession
+      summary: 会话详情
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/ServerError" }
+    delete:
+      tags: [sessions]
+      operationId: deleteSession
+      summary: 删除会话（级联删除消息）
+      responses:
+        "204": { description: 已删除 }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/v1/sessions/{sessionId}/messages:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+    get:
+      tags: [sessions]
+      operationId: listMessages
+      summary: 会话消息（按时间正序，分页）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessagePage" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  # ---------------- 问答 ----------------
+  /api/v1/qa/stream:
+    post:
+      tags: [qa]
+      operationId: qaStream
+      summary: 知识问答（SSE 流式）
+      description: |
+        返回 text/event-stream。传输格式：每个事件为一行 `event: <类型>` + `data: <JSON 载荷>`，
+        事件间以空行分隔；服务端每 15 秒发送注释行 `:ping` 心跳。
+
+        事件类型与载荷（详见 QAStreamEvent oneOf）：
+        - `stage`    {stage, detail?, elapsedMs?} —— 仅报真实发生的阶段，禁止虚假进度
+        - `token`    {delta} —— 回答文本增量
+        - `citations`{citations[]} —— 恰好一次，内容为本次实际检索命中（资料不足时为空数组）；
+                       恒在 done 之前
+        - `done`     {messageId, elapsedMs} —— 终态
+        - `error`    {error{code,message,requestId}} —— 终态；code ∈ MODEL_TIMEOUT /
+                       MODEL_UNAVAILABLE / RETRIEVAL_FAILED / STREAM_INTERRUPTED / INTERNAL_ERROR
+        - `canceled` {reason:"USER_CANCELED"} —— 终态；由 POST /qa/cancel 或客户端断连触发
+
+        会话历史仅用于对话连贯性，不作为证据；引用只来自本次检索结果。
+        用户消息在流开始前即持久化，异常后可凭输入重试（QA-8）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QAStreamRequest" }
+      responses:
+        "200":
+          description: SSE 事件流
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/QAStreamEvent"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404":
+          description: KB_NOT_FOUND 或 SESSION_NOT_FOUND
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: STREAM_ALREADY_ACTIVE（同一 clientRequestId 已有活跃流，防重复提交）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/v1/qa/cancel:
+    post:
+      tags: [qa]
+      operationId: qaCancel
+      summary: 取消进行中的问答流
+      description: |
+        客户端也可直接断开 SSE 连接取消（服务端检测断连并停止生成）；此端点用于无法可靠
+        传递断连信号的客户端。对已结束/未知的 clientRequestId 返回 404 CANCEL_TARGET_NOT_FOUND。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QACancelRequest" }
+      responses:
+        "202":
+          description: 已受理取消，流将以 canceled 事件收尾
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QACancelResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404":
+          description: CANCEL_TARGET_NOT_FOUND
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  # ---------------- 检索调试 ----------------
+  /api/v1/debug/retrieval:
+    post:
+      tags: [debug]
+      operationId: debugRetrieval
+      summary: 检索调试（与问答共用同一检索代码路径与默认配置）
+      description: |
+        返回命中文档与分块、排名与分数、各阶段耗时、实际送入模型的上下文与问题线索
+        （未召回/全部低于阈值/上下文截断）。供调试页使用；不写入任何会话或消息。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DebugRetrievalRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DebugRetrievalResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404":
+          description: KB_NOT_FOUND
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  # ---------------- 评测 ----------------
+  /api/v1/eval/datasets:
+    get:
+      tags: [eval]
+      operationId: listEvalDatasets
+      summary: 数据集列表
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/EvalDataset" }
+        "500": { $ref: "#/components/responses/ServerError" }
+    post:
+      tags: [eval]
+      operationId: importEvalDataset
+      summary: 导入评测数据集（JSON 或 CSV 文件，产生新版本）
+      description: |
+        multipart 上传：按文件扩展名/内容识别 .json 或 .csv。每次导入在该数据集下产生一个
+        不可变版本（versionNo 递增）。字段：question（必填）、referenceAnswer、evidence
+        （相关文档/证据引用数组）、answerable（是否可回答）、category
+        （DIRECT/TERM_VARIATION/FOLLOW_UP/OUT_OF_KB/CONFUSABLE）。JSON 文件为对象数组；
+        CSV 表头须与字段同名（evidence 列为 JSON 字符串）。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, name, datasetType]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                name: { type: string, maxLength: 100 }
+                datasetType: { $ref: "#/components/schemas/DatasetType" }
+      responses:
+        "201":
+          description: 已导入
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EvalDataset" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "422":
+          description: INVALID_DATASET_FILE（文件解析失败/必填字段缺失/类别非法）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: DUPLICATE_EVAL_DATASET（数据集名称重复）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/v1/eval/runs:
+    get:
+      tags: [eval]
+      operationId: listEvalRuns
+      summary: 评测运行列表
+      parameters:
+        - name: datasetId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EvalRunPage" }
+        "500": { $ref: "#/components/responses/ServerError" }
+    post:
+      tags: [eval]
+      operationId: createEvalRun
+      summary: 发起评测运行（异步）
+      description: |
+        指定 datasetVersion（缺省取该数据集最新版本）与知识库；检索参数（topK/minScore）缺省取
+        服务端当前默认值。模型名、embedding 名与维度、检索参数、分块策略快照随运行保存
+        （configSnapshot），保证两次运行可对比。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EvalRunCreate" }
+      responses:
+        "202":
+          description: 已受理
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EvalRunAccepted" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404":
+          description: EVAL_DATASET_NOT_FOUND / KB_NOT_FOUND
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/v1/eval/runs/{runId}:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    get:
+      tags: [eval]
+      operationId: getEvalRun
+      summary: 评测运行详情（指标快照 + 样本结果分页）
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EvalRunDetail" }
+        "404":
+          description: EVAL_RUN_NOT_FOUND
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/v1/eval/runs/{runId}/items/{itemId}:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+      - $ref: "#/components/parameters/ItemId"
+    patch:
+      tags: [eval]
+      operationId: reviewEvalRunItem
+      summary: 人工标记样本失败原因
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EvalReviewUpdate" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EvalRunItem" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404":
+          description: EVAL_RUN_NOT_FOUND（含 run 下无此 item 的情况）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+components:
+  securitySchemes:
+    # 第一版无鉴权（本地/可信内网，单用户）。此处仅预留扩展位：
+    # 未来接入时在根级添加 security: [{ bearerAuth: [] }] 即可，无需改动各 path。
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: 预留，第一版未启用。
+  parameters:
+    KbId:
+      name: kbId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    DocId:
+      name: docId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RunId:
+      name: runId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ItemId:
+      name: itemId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Page:
+      name: page
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: pageSize
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+  responses:
+    BadRequest:
+      description: 参数非法（INVALID_ARGUMENT；字段级问题在 details 中）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: 资源不存在（KB_NOT_FOUND / DOCUMENT_NOT_FOUND / SESSION_NOT_FOUND）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ServerError:
+      description: 服务内部错误（INTERNAL_ERROR）或依赖不可用（SERVICE_UNAVAILABLE）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    # ---------- 通用 ----------
+    Error:
+      type: object
+      required: [code, message, requestId]
+      properties:
+        code:
+          type: string
+          description: |
+            稳定错误码枚举（第一版全集）：
+            INVALID_ARGUMENT, CONFIRMATION_REQUIRED,
+            KB_NOT_FOUND, KB_NAME_DUPLICATED, DOCUMENT_NOT_FOUND, SESSION_NOT_FOUND,
+            DUPLICATE_DOCUMENT, UNSUPPORTED_FILE_TYPE, SCANNED_PDF_NOT_SUPPORTED,
+            FILE_TOO_LARGE, PARSED_TEXT_NOT_READY, TASK_NOT_RETRYABLE,
+            DUPLICATE_EVAL_DATASET, EVAL_DATASET_NOT_FOUND, EVAL_RUN_NOT_FOUND,
+            INVALID_DATASET_FILE,
+            MODEL_TIMEOUT, MODEL_UNAVAILABLE, RETRIEVAL_FAILED, PARSER_UNAVAILABLE,
+            STREAM_ALREADY_ACTIVE, CANCEL_TARGET_NOT_FOUND, STREAM_INTERRUPTED,
+            SERVICE_UNAVAILABLE, INTERNAL_ERROR
+          enum:
+            - INVALID_ARGUMENT
+            - CONFIRMATION_REQUIRED
+            - KB_NOT_FOUND
+            - KB_NAME_DUPLICATED
+            - DOCUMENT_NOT_FOUND
+            - SESSION_NOT_FOUND
+            - DUPLICATE_DOCUMENT
+            - UNSUPPORTED_FILE_TYPE
+            - SCANNED_PDF_NOT_SUPPORTED
+            - FILE_TOO_LARGE
+            - PARSED_TEXT_NOT_READY
+            - TASK_NOT_RETRYABLE
+            - DUPLICATE_EVAL_DATASET
+            - EVAL_DATASET_NOT_FOUND
+            - EVAL_RUN_NOT_FOUND
+            - INVALID_DATASET_FILE
+            - MODEL_TIMEOUT
+            - MODEL_UNAVAILABLE
+            - RETRIEVAL_FAILED
+            - PARSER_UNAVAILABLE
+            - STREAM_ALREADY_ACTIVE
+            - CANCEL_TARGET_NOT_FOUND
+            - STREAM_INTERRUPTED
+            - SERVICE_UNAVAILABLE
+            - INTERNAL_ERROR
+        message:
+          type: string
+          description: 面向用户的人读文案（中文）
+        requestId:
+          type: string
+          description: 服务端请求标识，同时经 X-Request-Id 响应头返回
+        details:
+          type: array
+          description: 字段级问题或附加信息（如 DUPLICATE_DOCUMENT 的 existingDocumentId）
+          items:
+            type: object
+            required: [issue]
+            properties:
+              field: { type: string }
+              issue: { type: string }
+
+    # ---------- 知识库 ----------
+    KnowledgeBase:
+      type: object
+      required: [id, name, documentCount, chunkCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, maxLength: 100 }
+        description: { type: string, maxLength: 500 }
+        documentCount: { type: integer }
+        chunkCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    KnowledgeBaseCreate:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        description: { type: string, maxLength: 500 }
+    KnowledgeBaseUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        description: { type: string, maxLength: 500 }
+    DeletionSummary:
+      type: object
+      required: [kbId, documentsDeleted, sessionsDeleted, messagesDeleted, cleanupTasksAccepted]
+      properties:
+        kbId: { type: string, format: uuid }
+        documentsDeleted: { type: integer }
+        chunksDeleted:
+          type: integer
+          description: ES 侧最近已知分块数；实际清理由补偿任务完成，此值不含进行中变更
+        sessionsDeleted: { type: integer }
+        messagesDeleted: { type: integer }
+        cleanupTasksAccepted:
+          type: integer
+          description: 已写入清理补偿表的任务数（ES + MinIO）
+
+    # ---------- 文档与流水线 ----------
+    DocumentStatus:
+      type: string
+      enum: [QUEUED, PROCESSING, COMPLETED, FAILED]
+    PipelineStage:
+      type: string
+      description: 真实流水线阶段；SSE 与任务进度均不得出现此枚举之外的“虚假进度”
+      enum: [QUEUED, PARSING, CLEANING, CHUNKING, EMBEDDING, INDEXING, COMPLETED]
+    ChunkStrategy:
+      type: string
+      description: |
+        LENGTH_OVERLAP：按长度+重叠切分；STRUCTURE：按标题/段落结构切分并以 maxLength 封顶。
+        两者均保留标题路径与可获得页码（KB-6/KB-7）。
+      enum: [LENGTH_OVERLAP, STRUCTURE]
+    ChunkingConfig:
+      type: object
+      required: [strategy, maxLength, overlap]
+      properties:
+        strategy: { $ref: "#/components/schemas/ChunkStrategy" }
+        maxLength: { type: integer, minimum: 200, maximum: 4000 }
+        overlap: { type: integer, minimum: 0, maximum: 500 }
+    Document:
+      type: object
+      required: [id, kbId, name, fileType, sizeBytes, status, currentStage, chunkCount, rootId, versionNo, isActive, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        kbId: { type: string, format: uuid }
+        name: { type: string }
+        fileType: { type: string, enum: [PDF, MD, TXT, DOCX, XLSX, CSV] }
+        sizeBytes: { type: integer, format: int64 }
+        status: { $ref: "#/components/schemas/DocumentStatus" }
+        currentStage: { $ref: "#/components/schemas/PipelineStage" }
+        chunkCount: { type: integer }
+        rootId:
+          type: string
+          format: uuid
+          description: 同源文档组标识 = 组内第一版 document.id（R3-P3）；单版本文档 rootId=id
+        versionNo:
+          type: integer
+          minimum: 1
+          description: 组内版本号，从 1 递增（同名不同内容再上传产生新版本）
+        isActive:
+          type: boolean
+          description: 组内激活版本（检索只命中激活版本）；组内至多一个 TRUE
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    DocumentDetail:
+      allOf:
+        - $ref: "#/components/schemas/Document"
+        - type: object
+          required: [chunkConfig, contentSha256]
+          properties:
+            chunkConfig: { $ref: "#/components/schemas/ChunkingConfig" }
+            contentSha256: { type: string }
+            failureStage:
+              $ref: "#/components/schemas/PipelineStage"
+            failureReason:
+              type: string
+              description: 失败错误码 + 人读文案（status=FAILED 时非空）
+            task:
+              $ref: "#/components/schemas/IngestionTask"
+    IngestionTask:
+      type: object
+      required: [id, documentId, status, stage, attempt, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [QUEUED, RUNNING, COMPLETED, FAILED]
+        stage: { $ref: "#/components/schemas/PipelineStage" }
+        attempt: { type: integer, minimum: 1 }
+        failureStage: { $ref: "#/components/schemas/PipelineStage" }
+        failureReason: { type: string }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+    UploadAccepted:
+      type: object
+      required: [document, task]
+      properties:
+        document: { $ref: "#/components/schemas/Document" }
+        task: { $ref: "#/components/schemas/IngestionTask" }
+    ParsedText:
+      type: object
+      required: [docId, content, charCount]
+      properties:
+        docId: { type: string, format: uuid }
+        content: { type: string, description: 解析+清洗后文本；受 maxChars 截断时以 truncated 标记 }
+        charCount: { type: integer }
+        truncated: { type: boolean }
+    Chunk:
+      type: object
+      required: [id, docId, seq, titlePath, charCount, text]
+      properties:
+        id:
+          type: string
+          description: 确定性 chunkId（docId + "-c" + seq），重试重建不变
+        docId: { type: string, format: uuid }
+        seq: { type: integer, minimum: 0 }
+        titlePath:
+          type: string
+          description: 标题路径（如 “部署指南 > 常见故障 > 磁盘告警”），无结构时为文档名
+        page:
+          type: integer
+          nullable: true
+          description: 起始页码；仅 PDF 可获得，MD/TXT 为 null
+        charCount: { type: integer }
+        text: { type: string }
+    DocumentPage:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Document" }
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+    ChunkPage:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Chunk" }
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+    DocumentDeletionResult:
+      type: object
+      required: [docId, cleanupTasksAccepted]
+      properties:
+        docId: { type: string, format: uuid }
+        chunksDeleted: { type: integer, description: ES 侧最近已知分块数 }
+        cleanupTasksAccepted: { type: integer }
+
+    # ---------- 会话与消息 ----------
+    Session:
+      type: object
+      required: [id, kbId, title, messageCount, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        kbId: { type: string, format: uuid }
+        title: { type: string }
+        messageCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    SessionCreate:
+      type: object
+      required: [kbId]
+      properties:
+        kbId: { type: string, format: uuid }
+        title: { type: string, maxLength: 100, description: 缺省取首条提问前 N 字 }
+    Citation:
+      type: object
+      required: [chunkId, docId, docName, titlePath, score]
+      properties:
+        chunkId: { type: string }
+        docId: { type: string, format: uuid }
+        docName: { type: string }
+        titlePath: { type: string }
+        page: { type: integer, nullable: true }
+        score:
+          type: number
+          format: float
+          description: |
+            该引用的最终排序分。R2 语义变更：不再是固定 cosine——
+            VECTOR 模式为余弦相似度，HYBRID 为归一化融合分，HYBRID_RERANK 为重排相关度
+            （请求内相对值）。字段类型与位置不变，但跨模式的数值不可直接比较；
+            V1 版本落库的历史引用仍是 cosine 语义（旧数据不作迁移）。
+    Message:
+      type: object
+      required: [id, sessionId, role, content, citations, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        sessionId: { type: string, format: uuid }
+        role: { type: string, enum: [USER, ASSISTANT] }
+        content: { type: string }
+        citations:
+          type: array
+          description: 仅来自该回答对应的实际检索结果；资料不足时为空数组
+          items: { $ref: "#/components/schemas/Citation" }
+        status: { type: string, enum: [COMPLETED, ERROR, CANCELED] }
+        error: { $ref: "#/components/schemas/Error" }
+        createdAt: { type: string, format: date-time }
+    MessagePage:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Message" }
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+
+    # ---------- 问答（SSE） ----------
+    QAStreamRequest:
+      type: object
+      required: [kbId, sessionId, question]
+      properties:
+        kbId: { type: string, format: uuid, description: 检索严格限定该知识库（QA-1） }
+        sessionId: { type: string, format: uuid }
+        question: { type: string, minLength: 1, maxLength: 2000 }
+        clientRequestId:
+          type: string
+          format: uuid
+          description: 客户端生成的幂等键；重复提交同键请求返回 409 STREAM_ALREADY_ACTIVE
+    QAStreamEvent:
+      description: |
+        SSE 载荷 oneOf。每个 SSE 事件的 data 字段是下列之一，由 event 行标明类型；
+        顺序约束：citations 恒在 done 之前；done/error/canceled 互斥且为终态。
+      oneOf:
+        - $ref: "#/components/schemas/StreamEventStage"
+        - $ref: "#/components/schemas/StreamEventToken"
+        - $ref: "#/components/schemas/StreamEventCitations"
+        - $ref: "#/components/schemas/StreamEventDone"
+        - $ref: "#/components/schemas/StreamEventError"
+        - $ref: "#/components/schemas/StreamEventCanceled"
+    StreamEventStage:
+      type: object
+      required: [stage]
+      properties:
+        stage:
+          type: string
+          description: 仅报真实发生的阶段（QA-4）
+          enum: [RETRIEVAL_STARTED, RETRIEVAL_COMPLETED, GENERATION_STARTED]
+        detail:
+          type: string
+          description: 如 “命中 6 块 · 128ms”
+        elapsedMs: { type: integer }
+    StreamEventToken:
+      type: object
+      required: [delta]
+      properties:
+        delta: { type: string, description: 回答文本增量 }
+    StreamEventCitations:
+      type: object
+      required: [citations]
+      properties:
+        citations:
+          type: array
+          items: { $ref: "#/components/schemas/Citation" }
+    StreamEventDone:
+      type: object
+      required: [messageId]
+      properties:
+        messageId: { type: string, format: uuid }
+        elapsedMs: { type: integer }
+    StreamEventError:
+      type: object
+      required: [error]
+      properties:
+        error: { $ref: "#/components/schemas/Error" }
+    StreamEventCanceled:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, enum: [USER_CANCELED] }
+    QACancelRequest:
+      type: object
+      required: [clientRequestId]
+      properties:
+        clientRequestId: { type: string, format: uuid }
+    QACancelResult:
+      type: object
+      required: [clientRequestId, canceled]
+      properties:
+        clientRequestId: { type: string, format: uuid }
+        canceled: { type: boolean, const: true }
+
+    # ---------- 检索调试 ----------
+    DebugRetrievalRequest:
+      type: object
+      required: [kbId, question]
+      properties:
+        kbId: { type: string, format: uuid }
+        question: { type: string, minLength: 1, maxLength: 2000 }
+        topK: { type: integer, minimum: 1, maximum: 50, description: 缺省取服务端配置 }
+        minScore: { type: number, minimum: 0, maximum: 1, description: 缺省取服务端配置 }
+        mode:
+          type: string
+          nullable: true
+          enum: [VECTOR, HYBRID, HYBRID_RERANK]
+          description: 检索模式覆盖（R2-D1）；缺省取服务端配置。用于对比「仅向量 / 融合 / 融合+重排」的排序差异
+    RetrievalMode:
+      type: string
+      enum: [VECTOR, HYBRID, HYBRID_RERANK]
+      description: |
+        检索模式（R2-H）。VECTOR=仅向量 kNN（第一轮基线）；HYBRID=BM25 与向量双通道候选 + 应用侧 RRF 融合；
+        HYBRID_RERANK=融合后再调用重排模型定序。
+        score 语义随模式不同：VECTOR 为余弦相似度；HYBRID 为归一化融合分；
+        HYBRID_RERANK 为重排相关度（请求内相对值）。三者不可直接比较，切换模式需重新校准 minScore 与拒答阈值。
+    RetrievalStageRank:
+      type: object
+      required: [stage, rank, score]
+      properties:
+        stage:
+          type: string
+          enum: [vector, bm25, fused, rerank]
+        rank: { type: integer, minimum: 1, description: 该候选在此阶段的位次 }
+        score: { type: number, format: float, description: 该阶段的原始分数（量纲随阶段不同） }
+    RetrievalHit:
+      type: object
+      required: [rank, chunk, score, passedThreshold]
+      properties:
+        rank: { type: integer, minimum: 1 }
+        chunk: { $ref: "#/components/schemas/Chunk" }
+        score:
+          type: number
+          format: float
+          description: 最终排序分（决定 rank 与 passedThreshold）；语义随检索模式不同，见 RetrievalMode
+        passedThreshold: { type: boolean, description: 是否通过 minScore 进入上下文 }
+        stages:
+          type: array
+          description: |
+            该候选在各检索阶段的位次与分数（R2-D1）。只含实际参与且该候选出现的阶段——
+            某阶段缺失即表示该通道未召回此候选（此信息本身用于解释排序变化）。
+          items: { $ref: "#/components/schemas/RetrievalStageRank" }
+        rankChangedReason:
+          type: string
+          nullable: true
+          description: 排序变化原因（如「RRF 融合调整：向量 #3 → 融合 #1」）；无变化为 null
+    DebugTimings:
+      type: object
+      required: [embedMs, searchMs, totalMs]
+      properties:
+        embedMs: { type: integer }
+        searchMs: { type: integer }
+        totalMs: { type: integer }
+    DebugIssue:
+      type: object
+      required: [type, message]
+      properties:
+        type:
+          type: string
+          enum: [NO_HITS, ALL_BELOW_THRESHOLD, CONTEXT_TRUNCATED, RERANK_DEGRADED]
+          description: RERANK_DEGRADED 表示本次重排未生效、结果使用融合顺序（降级结果不可与正常重排结果直接比较）
+        message: { type: string }
+    DebugRetrievalResult:
+      type: object
+      required: [effectiveConfig, hits, timings, context, issues]
+      properties:
+        effectiveConfig:
+          type: object
+          required: [topK, minScore, embeddingModel, dimensions]
+          properties:
+            topK: { type: integer }
+            minScore: { type: number }
+            embeddingModel: { type: string }
+            dimensions: { type: integer }
+            chatModel: { type: string, description: 问答页将使用的生成模型（只读展示） }
+            mode: { $ref: "#/components/schemas/RetrievalMode" }
+            candidateLimit: { type: integer, description: 各通道候选数上限 }
+            rrfK: { type: integer, description: RRF 常数 k }
+            rerankModel: { type: string, description: 重排模型名；未启用重排时为空串 }
+            rerankEnabled: { type: boolean, description: 本次是否会调用重排 }
+            rerankDegraded: { type: boolean, description: 本次是否发生重排降级（重排未生效） }
+            rerankDegradeReason: { type: string, nullable: true, description: 降级原因 }
+        hits:
+          type: array
+          items: { $ref: "#/components/schemas/RetrievalHit" }
+        timings: { $ref: "#/components/schemas/DebugTimings" }
+        context:
+          type: object
+          required: [text, charCount, chunkIds]
+          properties:
+            text: { type: string, description: 实际送入模型的上下文全文 }
+            charCount: { type: integer }
+            chunkIds:
+              type: array
+              items: { type: string }
+        issues:
+          type: array
+          items: { $ref: "#/components/schemas/DebugIssue" }
+
+    # ---------- 评测 ----------
+    DatasetType:
+      type: string
+      description: 调优集与独立测试集严格分离（EV-6）
+      enum: [TUNING, TEST]
+    EvalCategory:
+      type: string
+      enum: [DIRECT, TERM_VARIATION, FOLLOW_UP, OUT_OF_KB, CONFUSABLE]
+    EvidenceRef:
+      type: object
+      properties:
+        docName: { type: string }
+        titlePath: { type: string }
+        page: { type: integer, nullable: true }
+        snippet: { type: string }
+        chunkId:
+          type: string
+          description: 分块级锚点（v2 数据集起）：分块确定性 id
+        contentHash:
+          type: string
+          description: |
+            分块级稳定锚点（R3-P1）：分块正文规范化（去首尾空白 + 内部空白折叠为
+            单空格）后 SHA-256 前 16 hex，由服务端 EvidenceMatcher.contentHashOf
+            统一计算。与文件名/分块策略解耦——文档改名或重入库导致 chunkId
+            变化后仍可判定命中。判定时与 chunkId/titlePath/anchorPath 同为
+            精确相等匹配，优先级最高。
+    EvalDataset:
+      type: object
+      required: [id, name, datasetType, latestVersion, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, maxLength: 100 }
+        datasetType: { $ref: "#/components/schemas/DatasetType" }
+        latestVersion:
+          type: object
+          required: [versionId, versionNo, itemCount, createdAt]
+          properties:
+            versionId: { type: string, format: uuid }
+            versionNo: { type: integer, minimum: 1 }
+            itemCount: { type: integer }
+            createdAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+    EvalRunCreate:
+      type: object
+      required: [datasetId, kbId]
+      properties:
+        datasetId: { type: string, format: uuid }
+        versionId:
+          type: string
+          format: uuid
+          description: 缺省取该数据集最新版本
+        kbId: { type: string, format: uuid }
+        topK: { type: integer, minimum: 1, maximum: 50 }
+        minScore: { type: number, minimum: 0, maximum: 1 }
+    EvalRunAccepted:
+      type: object
+      required: [runId, status]
+      properties:
+        runId: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/EvalRunStatus" }
+    EvalRunStatus:
+      type: string
+      enum: [RUNNING, COMPLETED, FAILED]
+    EvalRunSummary:
+      type: object
+      required: [runId, datasetId, datasetVersionId, kbId, status, itemCount, createdAt]
+      properties:
+        runId: { type: string, format: uuid }
+        datasetId: { type: string, format: uuid }
+        datasetVersionId: { type: string, format: uuid }
+        kbId: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/EvalRunStatus" }
+        itemCount: { type: integer }
+        hitAt1: { type: number, nullable: true }
+        hitAt3: { type: number, nullable: true }
+        hitAt5: { type: number, nullable: true }
+        recallAt5:
+          type: number
+          nullable: true
+          description: R2-E2 Recall@5 = 命中的参考证据分块数 / 参考证据分块总数（分块级口径）
+        mrr:
+          type: number
+          nullable: true
+          description: R2-E2 MRR = 每题首个命中证据分块排名倒数的平均值（未召回计 0）
+        refusalAccuracy:
+          type: number
+          nullable: true
+          description: |
+            R2-E3 拒答正确率 = (answerable=false 且拒答 + answerable=true 且未拒答) / 已执行题数。
+            与 Hit@K 分列：资料外题的"是否安全拒答"不再因退出 Hit@K 分母而消失。
+        rankDistribution:
+          type: object
+          nullable: true
+          additionalProperties: { type: integer }
+          description: R2-E2 正确答案排名分布；键为 "1".."5" 与 "notFound"
+        retrievalMsAvg: { type: number, nullable: true, description: R2-L1 平均检索耗时 }
+        generationMsAvg: { type: number, nullable: true, description: R2-L1 平均生成耗时 }
+        latencyP50Ms: { type: integer, nullable: true, description: R2-L1 单题耗时中位数 }
+        latencyP95Ms: { type: integer, nullable: true, description: R2-L1 单题耗时 95 分位 }
+        latencyMaxMs: { type: integer, nullable: true, description: R2-L1 最慢单题耗时 }
+        answerableCount: { type: integer, nullable: true, description: 计入 Hit@K 分母的可答题数 }
+        outOfKbCount: { type: integer, nullable: true, description: 资料外题数（不计入 Hit@K 分母） }
+        metrics:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: 原始 metrics 对象（含上列全部 R2 指标）；未完成运行为 null
+        configSnapshot:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: 运行配置快照；列表页展示检索模式、对比页做可比性守卫（R2-C3）
+        failureReason: { type: string, nullable: true, description: 失败原因（列表行内展示） }
+        avgLatencyMs: { type: number, nullable: true }
+        createdAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time, nullable: true }
+    EvalRunPage:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/EvalRunSummary" }
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+    EvalHit:
+      type: object
+      required: [rank, chunkId, docName, titlePath, score]
+      properties:
+        rank: { type: integer, minimum: 1 }
+        chunkId: { type: string }
+        docName: { type: string }
+        titlePath: { type: string }
+        contentHash:
+          type: string
+          nullable: true
+          description: 命中分块正文的规范化 SHA-256 前 16 hex（R3-P1，EvidenceMatcher.contentHashOf 计算）
+        page: { type: integer, nullable: true }
+        score:
+          type: number
+          format: float
+          description: 最终排序分（语义随检索模式不同，见 RetrievalMode）
+        passedThreshold: { type: boolean, description: 是否通过 minScore；未过阈值的命中保留在快照中供调试与归因 }
+        vectorRank: { type: integer, nullable: true, description: 向量通道位次；未参与或未召回为 null }
+        vectorScore: { type: number, nullable: true, description: 向量余弦相似度 }
+        bm25Rank: { type: integer, nullable: true, description: BM25 通道位次；VECTOR 模式恒为 null }
+        bm25Score: { type: number, nullable: true, description: BM25 原始分（无上界，不可跨查询比较） }
+        fusedRank: { type: integer, nullable: true, description: RRF 融合后位次 }
+        fusedScore: { type: number, nullable: true, description: 归一化融合分（原始 RRF 分保留在调试接口中） }
+        rerankRank: { type: integer, nullable: true, description: 重排后位次；未启用或降级为 null }
+        rerankScore: { type: number, nullable: true, description: 重排相关度（请求内相对值，不可跨请求比较） }
+    EvalRunItem:
+      type: object
+      required: [id, seq, question, retrieved]
+      properties:
+        id: { type: string, format: uuid }
+        seq: { type: integer }
+        question: { type: string }
+        referenceAnswer: { type: string, nullable: true }
+        answerable: { type: boolean }
+        category: { $ref: "#/components/schemas/EvalCategory" }
+        retrieved:
+          type: array
+          description: 本次运行的检索命中（快照）
+          items: { $ref: "#/components/schemas/EvalHit" }
+        generatedAnswer: { type: string, nullable: true }
+        citations:
+          type: array
+          items: { $ref: "#/components/schemas/Citation" }
+        hit:
+          type: boolean
+          nullable: true
+          description: |
+            参考证据是否出现在命中集中（样本级 Hit@K，K=该次运行 topK）。
+            R2-E1：判定已下沉到分块级——按 evidence.chunkId / titlePath / anchorPath 与命中分块精确匹配；
+            不再回退到 docName 相等（那会让指标退化为文档级而失去区分度）。
+        latencyMs: { type: integer, nullable: true }
+        evidenceRank:
+          type: integer
+          nullable: true
+          description: |
+            正确答案分块在本次 retrieved 中的首个命中位次（1 起，R2-E2）；
+            未命中或该题为资料外（无参考证据）为 null。
+            与指标分子同一判定口径（EvidenceMatcher），保证展示与统计一致。
+        retrievalMs: { type: integer, nullable: true, description: 该题检索耗时（R2-L1）；旧数据为 null }
+        generationMs: { type: integer, nullable: true, description: 该题生成耗时（R2-L1）；拒答路径未调用模型，约为 0 }
+        reviewTag:
+          type: string
+          nullable: true
+          enum: [OK, WRONG_ANSWER, MISSING_EVIDENCE, WRONG_SOURCE, OTHER]
+          description: 人工标记的失败原因；未标注为 null
+        reviewNote: { type: string, nullable: true }
+    EvalRunItemPage:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/EvalRunItem" }
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+    EvalRunDetail:
+      allOf:
+        - $ref: "#/components/schemas/EvalRunSummary"
+        - type: object
+          required: [items]
+          properties:
+            configSnapshot:
+              type: object
+              description: |
+                运行配置快照（EV-4）：chatModel、embeddingModel、embeddingDimensions、
+                topK、minScore、chunkStrategy、maxChunkChars 等，按实际执行值记录。
+                R2 增补：retrievalMode、rrfK、candidateLimit、rerankEnabled、rerankModel、
+                rerankDegradeOnFailure、refusalEnabled、refusalInsufficientThreshold——
+                缺任一项都会让"改了检索配置"的两次运行无法区分（EV-4）。
+              additionalProperties: true
+            failureReason: { type: string, nullable: true }
+            items: { $ref: "#/components/schemas/EvalRunItemPage" }
+    EvalReviewUpdate:
+      type: object
+      required: [reviewTag]
+      properties:
+        reviewTag:
+          type: string
+          enum: [OK, WRONG_ANSWER, MISSING_EVIDENCE, WRONG_SOURCE, OTHER]
+        reviewNote: { type: string, maxLength: 1000 }
+
+# 安全说明（第一版）：所有 path 不挂 security 字段 = 无鉴权。理由与部署假设见 docs/03-技术路线.md 第 7 节。

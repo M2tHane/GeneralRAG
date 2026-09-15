@@ -1,0 +1,7 @@
+错误码,类别,含义,常见触发场景,处置建议
+OFFSET_OUT_OF_RANGE,消费端,请求的位移超出分区现有位移范围,消费者离线过久、位移被删、日志保留期触发清理,按 auto.offset.reset 策略重置位移（earliest/latest）
+REBALANCE_IN_PROGRESS,消费端,消费组正在再均衡，本次拉取被拒绝,成员上下线、会话超时、max.poll.interval.ms 超时,排查频繁上下线；调大 max.poll.interval.ms 或减小 max.poll.records
+NOT_LEADER_FOR_PARTITION,集群,该分区的 Leader 已迁移到其他副本,Leader 切换、broker 重启,客户端自动刷新元数据后重试，无需人工干预
+MESSAGE_TOO_LARGE,生产端,消息超过 max.message.bytes,单条消息体积过大（如大 JSON/批量过大）,调大 topic 的 max.message.bytes 或拆分消息
+UNKNOWN_TOPIC_OR_PARTITION,集群,topic 不存在或分区尚未创建完成,topic 名拼写错误、自动创建未开启且 topic 未建,核对 topic 名；先创建 topic 或开启 auto.create.topics.enable
+COORDINATOR_NOT_AVAILABLE,消费组,组协调器暂不可用,__consumer_offsets 迁移、broker 负载高,自动重试；持续出现则检查 broker 健康

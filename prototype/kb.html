@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>知识库 · 通用知识问答 RAG 原型</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  /* 页面私有样式：仅作用于本页 */
+  table.table { min-width: 720px; }
+  .btn-text-danger { color: var(--destructive); }
+  .btn-text-danger:hover:not(:disabled) { color: var(--destructive); background: var(--destructive-bg); }
+  .impact-list { margin: 8px 0; padding-left: 20px; font-size: 14px; line-height: 22px; }
+  .impact-list li { margin-bottom: 4px; }
+  .kb-del-note { font-size: 13px; color: var(--muted-foreground); margin: 8px 0 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="sidebar-scrim" id="sidebar-scrim"></div>
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" id="menu-btn" aria-label="打开导航">☰</button>
+      <div class="crumb"><b>知识库</b></div>
+    </header>
+    <main class="content">
+      <div class="content-inner">
+        <div class="page-header">
+          <div>
+            <h1>知识库</h1>
+          </div>
+          <div class="actions">
+            <button class="btn btn-primary" id="btn-new">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+              新建知识库
+            </button>
+          </div>
+        </div>
+        <div id="page-body"></div>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="ui.js"></script>
+<script src="data.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, el) { return (el || document).querySelector(s); };
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function nowStr() {
+    var d = new Date();
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  SupieUI.initShell('kb');
+
+  var pageState = 'normal'; // normal | loading | error
+
+  // ---------- 状态渲染 ----------
+  function skeletonHTML() {
+    var rows = '';
+    for (var i = 0; i < 4; i++) {
+      rows += '<div class="skeleton-row">' +
+        '<div class="skeleton skeleton-line grow" style="max-width:220px"></div>' +
+        '<div class="skeleton skeleton-line" style="width:180px"></div>' +
+        '<div class="skeleton skeleton-line" style="width:56px"></div><div class="skeleton skeleton-line" style="width:72px"></div>' +
+        '<div class="skeleton skeleton-line" style="width:130px"></div><div class="skeleton skeleton-line" style="width:130px"></div></div>';
+    }
+    return '<div class="table-wrap">' + rows + '</div>';
+  }
+
+  function errorHTML() {
+    return '<div class="error-state">' +
+      '<div class="t">服务暂不可用</div>' +
+      '<div class="d">知识库数据加载失败，请稍后重试。</div>' +
+      '<button class="btn btn-outline" id="btn-state-retry">重试</button></div>';
+  }
+
+  function emptyHTML() {
+    return '<div class="empty-state">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1H8L4 8v11a1 1 0 0 0 1 1Z"/><path d="M4 8h16"/></svg>' +
+      '<div class="t">还没有知识库</div>' +
+      '<div class="d">创建知识库后即可上传文档，供知识问答与检索调试使用。</div>' +
+      '<button class="btn btn-primary" id="btn-empty-new">新建知识库</button></div>';
+  }
+
+  function renderBody() {
+    var body = $('#page-body');
+    if (pageState === 'error') {
+      body.innerHTML = errorHTML();
+      $('#btn-state-retry').addEventListener('click', function () { pageState = 'normal'; renderBody(); });
+      return;
+    }
+    if (pageState === 'loading') { body.innerHTML = skeletonHTML(); return; }
+
+    var kbs = MockData.knowledgeBases;
+    if (!kbs.length) { body.innerHTML = emptyHTML(); $('#btn-empty-new').addEventListener('click', function () { openKBModal(null); }); return; }
+
+    var rows = kbs.map(function (k) {
+      var docN = (MockData.documents[k.id] || []).length;
+      return '<tr>' +
+        '<td><div class="cell-main"><a href="docs.html?kb=' + encodeURIComponent(k.id) + '">' + esc(k.name) + '</a></div></td>' +
+        '<td class="truncate" style="color:var(--muted-foreground)">' + (k.description ? esc(k.description) : '—') + '</td>' +
+        '<td class="num">' + docN + '</td>' +
+        '<td class="num">' + k.chunkCount + '</td>' +
+        '<td class="muted">' + esc(k.createdAt) + '</td>' +
+        '<td class="muted">' + esc(k.updatedAt) + '</td>' +
+        '<td><div class="row-actions">' +
+          '<button class="btn btn-ghost btn-sm" data-rename="' + esc(k.id) + '">重命名</button>' +
+          '<button class="btn btn-ghost btn-sm btn-text-danger" data-del="' + esc(k.id) + '">删除</button>' +
+        '</div></td></tr>';
+    }).join('');
+
+    body.innerHTML =
+      '<div class="table-wrap"><table class="table">' +
+      '<thead><tr><th>知识库名称</th><th>描述</th><th class="num">文档数</th><th class="num">分块数</th><th>创建时间</th><th>更新时间</th><th style="text-align:right">操作</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table></div>';
+
+    body.querySelectorAll('[data-rename]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var kb = MockData.knowledgeBases.find(function (x) { return x.id === b.dataset.rename; });
+        if (kb) openKBModal(kb);
+      });
+    });
+    body.querySelectorAll('[data-del]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var kb = MockData.knowledgeBases.find(function (x) { return x.id === b.dataset.del; });
+        if (kb) openDelete(kb);
+      });
+    });
+  }
+
+  // ---------- 新建 / 重命名（居中 Modal：2 个简单字段，约 1 分钟完成） ----------
+  function openKBModal(kb) {
+    var isEdit = !!kb;
+    var m = SupieUI.openModal({
+      title: isEdit ? '重命名知识库' : '新建知识库',
+      bodyHTML:
+        '<div class="field">' +
+          '<label class="label" for="kb-name">名称 <span class="req">*</span></label>' +
+          '<input class="input" id="kb-name" value="' + (isEdit ? esc(kb.name) : '') + '" placeholder="例如：团队技术文档库">' +
+          '<div class="field-error" id="kb-name-err" style="display:none"></div>' +
+        '</div>' +
+        '<div class="field">' +
+          '<label class="label" for="kb-desc">描述</label>' +
+          '<textarea class="textarea" id="kb-desc" style="min-height:72px" placeholder="说明该知识库收录哪些文档（可选）">' + (isEdit ? esc(kb.description || '') : '') + '</textarea>' +
+        '</div>',
+      footerHTML: '<button class="btn btn-outline" data-cancel>取消</button>' +
+                  '<button class="btn btn-primary" data-ok style="min-width:96px">' + (isEdit ? '保存' : '创建') + '</button>',
+    });
+    var nameInput = m.overlay.querySelector('#kb-name');
+    var errEl = m.overlay.querySelector('#kb-name-err');
+    var okBtn = m.overlay.querySelector('[data-ok]');
+    m.overlay.querySelector('[data-cancel]').addEventListener('click', m.close);
+
+    function validate() {
+      var name = nameInput.value.trim();
+      if (!name) return '请输入知识库名称';
+      var dup = MockData.knowledgeBases.some(function (k) { return k.id !== (isEdit ? kb.id : null) && k.name === name; });
+      if (dup) return '已存在同名知识库';
+      return null;
+    }
+    nameInput.addEventListener('input', function () {
+      errEl.style.display = 'none'; nameInput.classList.remove('invalid');
+    });
+
+    okBtn.addEventListener('click', function () {
+      var err = validate();
+      if (err) { errEl.textContent = err; errEl.style.display = 'block'; nameInput.classList.add('invalid'); nameInput.focus(); return; }
+      okBtn.disabled = true;
+      okBtn.innerHTML = '<span class="spinner"></span> ' + (isEdit ? '保存中…' : '创建中…');
+      setTimeout(function () {
+        var name = nameInput.value.trim();
+        var desc = m.overlay.querySelector('#kb-desc').value.trim();
+        if (isEdit) {
+          kb.name = name; kb.description = desc; kb.updatedAt = nowStr();
+          SupieUI.toast('知识库已更新', 'success');
+        } else {
+          var nkb = { id: MockUtil.uid('kb'), name: name, description: desc, docCount: 0, chunkCount: 0, createdAt: nowStr(), updatedAt: nowStr() };
+          MockData.knowledgeBases.push(nkb);
+          MockData.documents[nkb.id] = [];
+          SupieUI.toast('知识库已创建', 'success');
+        }
+        m.close();
+        renderBody();
+      }, 600);
+    });
+  }
+
+  // ---------- 删除（确认 Modal 明确影响范围） ----------
+  function openDelete(kb) {
+    var docs = MockData.documents[kb.id] || [];
+    var impact;
+    if (docs.length > 0) {
+      impact = '<p>将删除知识库 <b>' + esc(kb.name) + '</b>，影响范围：</p>' +
+        '<ul class="impact-list">' +
+        '<li>其中 ' + docs.length + ' 篇文档及其全部分块与向量数据将被清除；</li>' +
+        '<li>相关问答会话中对该知识库的引用将失效。</li>' +
+        '</ul>' +
+        '<p class="kb-del-note">该操作不可恢复。</p>';
+    } else {
+      impact = '<p>将删除知识库 <b>' + esc(kb.name) + '</b>。该知识库暂无文档，删除后不可恢复。</p>';
+    }
+    SupieUI.confirmDanger({
+      title: '删除知识库',
+      html: impact,
+      confirmText: '删除',
+      onConfirm: function () {
+        var i = MockData.knowledgeBases.indexOf(kb);
+        if (i >= 0) MockData.knowledgeBases.splice(i, 1);
+        delete MockData.documents[kb.id];
+        SupieUI.toast('知识库已删除', 'success');
+        renderBody();
+      },
+    });
+  }
+
+  // ---------- 页面主操作与预览工具区 ----------
+  $('#btn-new').addEventListener('click', function () { openKBModal(null); });
+
+  SupieUI.initProtoTools([
+    {
+      label: '页面状态',
+      control: {
+        type: 'select',
+        options: ['正常', '加载中', '服务不可用'],
+        value: '正常',
+        onChange: function (v) {
+          pageState = v === '正常' ? 'normal' : (v === '加载中' ? 'loading' : 'error');
+          renderBody();
+        },
+      },
+    },
+  ]);
+
+  renderBody();
+})();
+</script>
+</body>
+</html>

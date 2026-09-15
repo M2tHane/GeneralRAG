@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>知识问答 · 通用知识问答 RAG</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  /* ===== chat.html 页面私有样式（Master–Detail：会话列表 + 对话区） ===== */
+  .chat-layout { flex: 1; display: flex; min-height: 0; }
+
+  /* ---------- 左侧会话列表 ---------- */
+  .sess-pane {
+    width: 264px; flex: none; display: flex; flex-direction: column; min-height: 0;
+    background: var(--surface-subtle); border-right: 1px solid var(--border);
+  }
+  .sess-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 12px 12px 8px 16px; flex: none;
+  }
+  .sess-head .t { font-size: 14px; font-weight: 600; }
+  .sess-list { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
+  .sess-item {
+    display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px;
+    border-radius: var(--radius-sm); cursor: pointer; margin-bottom: 2px;
+  }
+  .sess-item:hover { background: var(--muted); }
+  .sess-item.active { background: var(--primary-subtle); }
+  .sess-item .info { flex: 1; min-width: 0; }
+  .sess-item .name { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sess-item.active .name { color: var(--primary); }
+  .sess-item .time { font-size: 12px; color: var(--muted-foreground); margin-top: 1px; font-variant-numeric: tabular-nums; }
+  .sess-item .del { opacity: 0; flex: none; }
+  .sess-item:hover .del, .sess-item.active .del { opacity: 1; }
+  .sess-list .mini-empty { font-size: 13px; color: var(--muted-foreground); padding: 16px 12px; line-height: 20px; }
+  .skl-sess { padding: 10px 12px; }
+  .skl-sess .s1 { height: 14px; width: 70%; margin-bottom: 8px; }
+  .skl-sess .s2 { height: 11px; width: 40%; }
+
+  .sess-scrim { display: none; }
+
+  /* ---------- 右侧对话区 ---------- */
+  .chat-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--background); }
+  .chat-head {
+    flex: none; height: 48px; display: flex; align-items: center; gap: 10px;
+    padding: 0 20px; border-bottom: 1px solid var(--border); background: var(--surface);
+  }
+  .chat-head .title { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .chat-head .cnt { font-size: 13px; color: var(--muted-foreground); flex: none; }
+  .sess-toggle { display: none; }
+
+  .msg-area { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
+  .msg { display: flex; }
+  .msg.user { justify-content: flex-end; }
+  .msg .bubble { max-width: min(760px, 86%); }
+  .msg.user .bubble {
+    background: var(--primary); color: var(--primary-foreground);
+    padding: 9px 14px; border-radius: var(--radius); font-size: 15px; line-height: 23px;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .msg.assistant .bubble {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px 16px;
+  }
+  .stage-box { display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
+  .answer-text { font-size: 15px; line-height: 24px; white-space: pre-wrap; word-break: break-word; margin-top: 6px; }
+  .stream-note { font-size: 13px; color: var(--warning); margin-top: 8px; line-height: 18px; }
+  .demo-note { font-size: 13px; color: var(--muted-foreground); margin-top: 8px; line-height: 18px; }
+  .citations { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .citations .cite-label { font-size: 13px; color: var(--muted-foreground); width: 100%; }
+  .cite-chip {
+    border: 1px solid var(--border); background: var(--surface-subtle); border-radius: 999px;
+    font-size: 13px; line-height: 18px; padding: 3px 10px; cursor: pointer; font-family: inherit;
+    color: var(--foreground); max-width: 100%; display: inline-flex; gap: 6px; align-items: center; min-width: 0;
+    text-align: left;
+  }
+  .cite-chip:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-subtle); }
+  .cite-chip .path { color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cite-chip:hover .path { color: var(--primary); }
+  .no-cite-line { font-size: 13px; color: var(--muted-foreground); border-top: 1px solid var(--border); margin-top: 10px; padding-top: 8px; }
+  /* 拒答语义（R2-A1）：引用清空是显式状态，不显示为空白 */
+  .no-cite-line.is-refusal {
+    font-size: 14px; color: var(--foreground); background: var(--surface-subtle);
+    border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 9px 12px; line-height: 20px;
+  }
+  .no-cite-line.is-refusal .t { font-weight: 600; display: block; margin-bottom: 3px; }
+  .refusal-why { font-size: 13px; color: var(--muted-foreground); line-height: 19px; margin-top: 6px; }
+  .q-chip .chip-tag {
+    margin-left: 6px; font-size: 12px; color: var(--muted-foreground);
+    border: 1px solid var(--border); border-radius: 999px; padding: 0 6px;
+  }
+  .msg-actions { margin-top: 8px; display: flex; gap: 8px; }
+  .ask-error {
+    margin-top: 10px; background: var(--destructive-bg); border: 1px solid hsl(0 72% 51% / 0.3);
+    color: var(--destructive); border-radius: var(--radius-sm); padding: 10px 12px;
+    display: flex; gap: 10px; align-items: center; font-size: 14px; line-height: 20px;
+  }
+  .ask-error .btn { margin-left: auto; flex: none; }
+
+  .chat-empty { flex: 1; display: flex; align-items: center; justify-content: center; }
+  .chat-empty .inner { max-width: 560px; text-align: center; padding: 24px; }
+  .chip-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 4px; }
+  .q-chip {
+    border: 1px solid var(--border); background: var(--surface); border-radius: 999px;
+    font-size: 13px; padding: 6px 14px; cursor: pointer; font-family: inherit; color: var(--foreground);
+  }
+  .q-chip:hover { border-color: var(--primary); color: var(--primary); }
+
+  /* ---------- 输入区（固定于对话区底部，页面不整页滚动） ---------- */
+  .composer { flex: none; border-top: 1px solid var(--border); background: var(--surface); padding: 12px 24px 16px; }
+  .composer-row { display: flex; gap: 8px; align-items: flex-end; max-width: 900px; margin: 0 auto; }
+  .composer-input {
+    flex: 1; resize: none; min-height: 40px; max-height: 132px; padding: 9px 12px;
+    border: 1px solid var(--input); border-radius: var(--radius); font-family: inherit;
+    font-size: 14px; line-height: 20px; background: var(--surface); color: var(--foreground);
+  }
+  .composer-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px hsl(217 91% 55% / 0.15); }
+  .composer-input:disabled { background: var(--muted); color: var(--muted-foreground); cursor: not-allowed; }
+  .composer-row .btn { flex: none; }
+  .composer-hint { font-size: 13px; color: var(--muted-foreground); margin: 6px auto 0; max-width: 900px; line-height: 18px; }
+
+  /* ---------- 顶栏知识库选择 ---------- */
+  .kb-wrap { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .kb-wrap .lbl { font-size: 13px; color: var(--muted-foreground); flex: none; }
+  .kb-wrap .select { width: auto; min-width: 180px; max-width: 260px; height: 32px; font-size: 14px; }
+
+  /* ---------- 窄屏：会话列表收起为抽屉 ---------- */
+  @media (max-width: 900px) {
+    .sess-pane {
+      position: fixed; left: 0; top: 0; bottom: 0; z-index: 70; width: 280px;
+      transform: translateX(-100%); transition: transform 0.2s ease-out; box-shadow: var(--shadow-pop);
+    }
+    .sess-pane.open { transform: translateX(0); }
+    .sess-scrim { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.4); z-index: 65; }
+    .sess-scrim.show { display: block; }
+    .sess-toggle { display: inline-flex; }
+    .msg-area { padding: 16px; }
+    .msg .bubble { max-width: 92%; }
+    .composer { padding: 10px 16px 12px; }
+    .kb-wrap .lbl { display: none; }
+    .kb-wrap .select { min-width: 0; max-width: 150px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="sidebar-scrim" id="sidebar-scrim"></div>
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" id="menu-btn" aria-label="打开导航">☰</button>
+      <div class="crumb"><b>知识问答</b></div>
+      <div class="kb-wrap">
+        <label class="lbl" for="kb-select">知识库</label>
+        <select id="kb-select" class="select" aria-label="选择知识库"></select>
+      </div>
+      <div class="spacer"></div>
+    </header>
+
+    <div class="chat-layout">
+      <aside class="sess-pane" id="sess-pane" aria-label="会话列表">
+        <div class="sess-head">
+          <span class="t">会话</span>
+          <button class="btn btn-primary btn-sm" id="btn-new-session">＋ 新建会话</button>
+        </div>
+        <div class="sess-list" id="sess-list"></div>
+      </aside>
+      <div class="sess-scrim" id="sess-scrim"></div>
+
+      <section class="chat-pane">
+        <div class="chat-head">
+          <button class="btn btn-outline btn-sm sess-toggle" id="btn-sess-toggle" aria-label="展开会话列表">会话</button>
+          <div class="title" id="chat-title"></div>
+          <div class="cnt" id="chat-cnt"></div>
+        </div>
+        <div class="msg-area" id="msg-area"></div>
+        <div class="composer">
+          <div class="composer-row">
+            <textarea id="q-input" class="composer-input" rows="1"
+              placeholder="输入问题，Ctrl/Cmd + Enter 发送" aria-label="输入问题"></textarea>
+            <button class="btn btn-primary" id="btn-send">发送</button>
+            <button class="btn btn-danger" id="btn-stop" style="display:none">停止</button>
+          </div>
+          <div class="composer-hint" id="composer-hint">Ctrl/Cmd + Enter 发送 · 回答仅基于当前所选知识库的资料，引用可点开查看分块原文</div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script src="ui.js"></script>
+<script src="data.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  /* ================= 页面私有演示数据（回答内容与检索计划） =================
+     与 data.js 的分块 / debugScenarios 同源：引用均指向真实存在的 chunkId。
+     未预置的库内问题复用最接近的预置回答并标注演示说明；资料外问题不伪造引用。 */
+
+  const OUTSIDE_RE = /(年假|报销|请假|工资|薪资|薪水|考勤|体检|天气|午餐|出差|福利)/;
+
+  /* R2-A1 拒答演示：检索有高于阈值的命中，但证据不足以支撑回答 → 拒答且清空引用。
+     问题文本取自 MockData.refusalDemo，避免页面内重复书写与漂移。 */
+  const REFUSAL_QUESTION = (window.MockData.refusalDemo || {}).question || '';
+  const norm = (s) => String(s).replace(/[？?！!。，,\s]/g, '');
+
+  const ANSWERS = {
+    'kb-pay': {
+      '支付回调超时一般怎么排查？': {
+        content: '根据文档记录，支付回调超时可按以下路径排查：\n\n1. 先看网关侧：回调线程池队列是否积压、回调成功率是否跌破 99%（1 分钟窗口即告警）。\n2. 再看下游：回调确认接口（订单服务）的 P99 延迟是否升高，慢 SQL 是常见诱因——2026-06 的故障就是 payment_status 更新语句未走索引导致确认接口超时。\n3. 最后看 MQ：回调分发 topic（pay-callback-dispatch）积压量是否超过 5000 条。\n\n若确认是下游变慢，应急上可对回调确认接口执行 800ms 超时降级，降级期间回调直接落库进入重试队列。',
+        citations: [
+          { chunkId: 'doc-101-c07', docId: 'doc-101', docName: '支付网关服务架构说明.md', titlePath: '… > 6. 监控与告警', page: null },
+          { chunkId: 'doc-201-c03', docId: 'doc-201', docName: '2026-06 支付回调超时故障复盘.pdf', titlePath: '… > 3. 根因分析', page: 5 },
+        ],
+        hits: 5, totalMs: 104, llmMs: 3120,
+      },
+      '重复发起支付请求会怎样？': {
+        content: '网关按幂等键（appId + outTradeNo）控制重复支付：\n\n- 10 秒内的重复请求直接返回原结果；\n- 超过 10 秒的重复请求返回 GW-4010（重复支付请求待确认），由业务方调用查询接口对账。\n\n幂等键在网关侧建立唯一索引，防重不依赖业务方实现。',
+        citations: [
+          { chunkId: 'doc-101-c05', docId: 'doc-101', docName: '支付网关服务架构说明.md', titlePath: '… > 4. 幂等控制', page: null },
+        ],
+        hits: 3, totalMs: 86, llmMs: 2280,
+      },
+      '那回调重试策略是什么？': {
+        content: '回调重试分两层：\n\n1. 渠道 → 网关：要求渠道至少重试 5 次，间隔 15s / 30s / 1m / 5m / 10m。\n2. 网关 → 业务方：回调确认超时（默认 5 秒）进入重试队列，最多重试 8 次，之后转人工处理。\n\n收到回调后先落库（callback_record 标记 RECEIVED）再分发，因此重试期间不会丢失原始回调记录。',
+        citations: [
+          { chunkId: 'doc-101-c02', docId: 'doc-101', docName: '支付网关服务架构说明.md', titlePath: '… > 2. 整体链路', page: null },
+          { chunkId: 'doc-101-c03', docId: 'doc-101', docName: '支付网关服务架构说明.md', titlePath: '… > 2.3 回调处理', page: null },
+        ],
+        hits: 3, totalMs: 97, llmMs: 2650,
+      },
+      '签名验签的时间戳允许多大偏差？': {
+        content: '对外接口统一使用 HMAC-SHA256 签名，签名串按 appId、timestamp、nonce、body 顺序拼接，密钥通过配置中心下发并每 24 小时轮换。\n\n时间戳允许偏差 ±300 秒，超出偏差的请求直接拒绝并返回错误码 GW-4003。',
+        citations: [
+          { chunkId: 'doc-101-c04', docId: 'doc-101', docName: '支付网关服务架构说明.md', titlePath: '… > 3. 对外接口 > 3.2 签名验签', page: null },
+        ],
+        hits: 3, totalMs: 88, llmMs: 2400,
+      },
+      '网关的容量上限是多少？': {
+        content: '按容量规划记录：生产环境部署 4 个实例，单实例 4C8G，可支撑峰值 1200 TPS 下单与 3000 TPS 回调查询。\n\n扩容时需同步调整 Kafka 消费组分区数与数据库连接池上限，否则容量提升不会实际生效。',
+        citations: [
+          { chunkId: 'doc-101-c08', docId: 'doc-101', docName: '支付网关服务架构说明.md', titlePath: '… > 7. 容量与部署', page: null },
+        ],
+        hits: 2, totalMs: 91, llmMs: 2100,
+      },
+      __fallbackKey: '支付回调超时一般怎么排查？',
+    },
+    'kb-fault': {
+      '数据库连接池耗尽怎么应急？': {
+        content: '连接池耗尽的典型现象：应用日志出现 "Connection is not available, request timed out after 30000ms"，接口大量 503，MySQL 侧 show processlist 可见大量 Sleep 连接。\n\n应急步骤：\n1. 定位占用连接的会话：SELECT * FROM information_schema.processlist WHERE command=\'Sleep\' AND time>60；\n2. kill 长事务会话释放连接；\n3. 无法快速定位时，滚动重启应用实例；\n4. 恢复后检查慢查询日志确认根因。\n\n常见根因按优先级排查：慢 SQL 占用连接（最常见，先查慢日志）、事务范围过大、连接池 maxPoolSize 低于并发需求、连接泄漏。HikariCP 可将 leakDetectionThreshold 设为 60000 辅助定位。',
+        citations: [
+          { chunkId: 'doc-202-c02', docId: 'doc-202', docName: '数据库连接池耗尽处理手册.md', titlePath: '… > 2. 应急步骤', page: null },
+          { chunkId: 'doc-202-c03', docId: 'doc-202', docName: '数据库连接池耗尽处理手册.md', titlePath: '… > 3. 常见根因', page: null },
+          { chunkId: 'doc-202-c01', docId: 'doc-202', docName: '数据库连接池耗尽处理手册.md', titlePath: '… > 1. 现象识别', page: null },
+        ],
+        hits: 4, totalMs: 95, llmMs: 2870,
+      },
+      'ES 集群 yellow 状态如何排查？': {
+        content: 'yellow 表示主分片全部可用、但有副本分片未分配，读写不受影响但冗余能力下降；red 表示存在未分配的主分片，相关索引不可写入。\n\n排查步骤：\n1. GET _cluster/health 查看未分配分片数；\n2. GET _cat/shards?v&h=index,shard,prirep,state,unassigned.reason 定位原因；\n3. 常见原因为磁盘水位超限（flood_stage 85%）或节点数少于副本数；\n4. 磁盘问题清理或调大 watermarks 后用 _cluster/reroute 重试分配。',
+        citations: [
+          { chunkId: 'doc-203-c02', docId: 'doc-203', docName: 'ES 集群黄色状态排查指南.md', titlePath: '… > 2. 排查步骤', page: null },
+          { chunkId: 'doc-203-c01', docId: 'doc-203', docName: 'ES 集群黄色状态排查指南.md', titlePath: '… > 1. 状态含义', page: null },
+        ],
+        hits: 3, totalMs: 92, llmMs: 2600,
+      },
+      'Kafka 积压为什么不能直接重置 offset？': {
+        content: '因为支付回调类消息一旦跳过就丢失了原始回调记录，无法再补偿。应急手册明确：极端情况启用旁路消费时，只跳过非关键消息并落库补偿，禁止通过重置 offset 跳过支付回调类消息。\n\n正确的处理路径是按优先级执行：扩容消费者（不超过分区数）→ 临时增加分区（生产慎用）→ 排查消费逻辑慢调用（外部接口超时最常见）→ 极端情况旁路消费。',
+        citations: [
+          { chunkId: 'doc-204-c02', docId: 'doc-204', docName: 'Kafka 消息积压应急手册.txt', titlePath: '… > 2. 处理手段', page: null },
+          { chunkId: 'doc-204-c01', docId: 'doc-204', docName: 'Kafka 消息积压应急手册.txt', titlePath: '… > 1. 判断积压', page: null },
+        ],
+        hits: 3, totalMs: 87, llmMs: 2300,
+      },
+      'Kafka 消息积压了怎么处理？': {
+        content: '先确认积压程度（单分区 LAG 持续 > 5000 或持续增长），然后按优先级处理：\n\n1. 扩容消费者（不超过分区数）；\n2. 临时增加分区（topic 空闲时，生产慎用）；\n3. 排查消费逻辑慢调用（外部接口超时最常见）；\n4. 极端情况启用旁路消费跳过非关键消息并落库补偿。\n\n注意：支付回调类消息禁止通过重置 offset 跳过。',
+        citations: [
+          { chunkId: 'doc-204-c02', docId: 'doc-204', docName: 'Kafka 消息积压应急手册.txt', titlePath: '… > 2. 处理手段', page: null },
+        ],
+        hits: 3, totalMs: 89, llmMs: 2450,
+      },
+      __fallbackKey: '数据库连接池耗尽怎么应急？',
+    },
+  };
+
+  /* ================= 状态 ================= */
+  const originalSessions = JSON.parse(JSON.stringify(window.MockData.sessions));
+  const state = {
+    kbId: null,
+    sessionId: null,
+    loading: false,
+    streaming: null, // { question, stopped, timer }
+    stick: true,
+    demo: { retrievalFail: false, timeout: false, streamBreak: false, noCite: false },
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const kbSelect = $('kb-select'), sessList = $('sess-list'), msgArea = $('msg-area');
+  const chatTitle = $('chat-title'), chatCnt = $('chat-cnt');
+  const qInput = $('q-input'), btnSend = $('btn-send'), btnStop = $('btn-stop');
+
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+  const sessionsFor = (kbId) => window.MockData.sessions.filter((s) => s.kbId === kbId);
+  const currentSession = () => window.MockData.sessions.find((s) => s.id === state.sessionId) || null;
+  const currentKb = () => window.MockUtil.kb(state.kbId);
+  const nowStr = () => {
+    const d = new Date(), p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+
+  /* ================= 渲染：知识库选择 ================= */
+  function renderKBSelect() {
+    kbSelect.innerHTML = window.MockData.knowledgeBases
+      .map((k) => `<option value="${esc(k.id)}" ${k.id === state.kbId ? 'selected' : ''}>${esc(k.name)}</option>`)
+      .join('');
+  }
+
+  kbSelect.addEventListener('change', () => {
+    if (state.streaming) { toast('回答生成中，请先停止或等待完成', 'error'); renderKBSelect(); return; }
+    selectKb(kbSelect.value);
+  });
+
+  function selectKb(kbId) {
+    state.kbId = kbId;
+    try { history.replaceState(null, '', `chat.html?kb=${encodeURIComponent(kbId)}`); } catch (e) { /* file:// 下忽略 */ }
+    renderKBSelect();
+    const list = sessionsFor(kbId);
+    state.sessionId = list.length ? list[0].id : null;
+    renderAll();
+  }
+
+  /* ================= 渲染：会话列表 ================= */
+  function renderSessionList() {
+    if (state.loading) {
+      sessList.innerHTML = Array.from({ length: 4 })
+        .map(() => '<div class="skl-sess"><div class="skeleton skeleton-line s1"></div><div class="skeleton skeleton-line s2"></div></div>')
+        .join('');
+      return;
+    }
+    const list = sessionsFor(state.kbId);
+    if (!list.length) {
+      sessList.innerHTML = '<div class="mini-empty">当前知识库暂无会话，点击「新建会话」开始提问。</div>';
+      return;
+    }
+    sessList.innerHTML = list.map((s) => `
+      <div class="sess-item ${s.id === state.sessionId ? 'active' : ''}" data-id="${esc(s.id)}" role="button" tabindex="0"
+           aria-label="切换到会话：${esc(s.title)}">
+        <div class="info">
+          <div class="name">${esc(s.title)}</div>
+          <div class="time">${esc(s.createdAt)}</div>
+        </div>
+        <button class="icon-btn del" data-del="${esc(s.id)}" aria-label="删除会话：${esc(s.title)}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+        </button>
+      </div>`).join('');
+  }
+
+  function switchSession(id) {
+    if (state.streaming) { toast('回答生成中，请先停止或等待完成', 'error'); return; }
+    if (id === state.sessionId) { closeSessDrawer(); return; }
+    state.sessionId = id;
+    renderSessionList(); renderMessages();
+    closeSessDrawer();
+    qInput.focus();
+  }
+
+  function deleteSession(id) {
+    if (state.streaming) { toast('回答生成中，请先停止或等待完成', 'error'); return; }
+    const s = window.MockData.sessions.find((x) => x.id === id);
+    if (!s) return;
+    SupieUI.confirmDanger({
+      title: '删除会话',
+      html: `将删除会话「<b>${esc(s.title)}</b>」及其全部 ${s.messages.length} 条消息记录，删除后不可恢复。`,
+      confirmText: '删除',
+      onConfirm: () => {
+        const arr = window.MockData.sessions;
+        arr.splice(arr.indexOf(s), 1);
+        if (state.sessionId === id) {
+          const rest = sessionsFor(state.kbId);
+          state.sessionId = rest.length ? rest[0].id : null;
+        }
+        renderAll();
+        SupieUI.toast('会话已删除', 'success');
+      },
+    });
+  }
+
+  function newSession() {
+    if (state.streaming) { toast('回答生成中，请先停止或等待完成', 'error'); return; }
+    const kb = currentKb();
+    if (!kb || kb.docCount === 0) { toast('该知识库暂无文档，请先上传文档', 'error'); return; }
+    const s = { id: window.MockUtil.uid('sess'), kbId: state.kbId, title: '新会话', createdAt: nowStr(), messages: [] };
+    window.MockData.sessions.unshift(s);
+    state.sessionId = s.id;
+    renderSessionList(); renderMessages();
+    closeSessDrawer();
+    qInput.focus();
+  }
+
+  sessList.addEventListener('click', (e) => {
+    const del = e.target.closest('[data-del]');
+    if (del) { e.stopPropagation(); deleteSession(del.dataset.del); return; }
+    const item = e.target.closest('.sess-item');
+    if (item) switchSession(item.dataset.id);
+  });
+  sessList.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const item = e.target.closest('.sess-item');
+    if (item) { e.preventDefault(); switchSession(item.dataset.id); }
+  });
+  $('btn-new-session').addEventListener('click', newSession);
+
+  /* 窄屏会话抽屉 */
+  const sessPane = $('sess-pane'), sessScrim = $('sess-scrim');
+  function closeSessDrawer() { sessPane.classList.remove('open'); sessScrim.classList.remove('show'); }
+  $('btn-sess-toggle').addEventListener('click', () => { sessPane.classList.add('open'); sessScrim.classList.add('show'); });
+  sessScrim.addEventListener('click', closeSessDrawer);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && sessPane.classList.contains('open')) closeSessDrawer();
+  });
+
+  /* ================= 渲染：消息区 ================= */
+  function citeChipHTML(c) {
+    const page = c.page != null ? ` · 第 ${c.page} 页` : '';
+    return `<button class="cite-chip" data-chunk="${esc(c.chunkId)}" data-doc="${esc(c.docId)}"
+      aria-label="查看引用原文：${esc(c.docName)}${page}">${esc(c.docName)}<span class="path">${esc(c.titlePath)}${esc(page)}</span></button>`;
+  }
+
+  function assistantBubbleHTML(m, fallbackQuestion) {
+    const reqQ = m.question || fallbackQuestion || '';
+    let html = '';
+    if (m.stopped) html += `<div class="stream-note">已手动停止，以上为已生成内容；本次未生成来源引用。</div>`;
+    if (m.demoNote) html += `<div class="demo-note">演示说明：该问题未预置独立回答，此处复用最接近的预置回答与引用。</div>`;
+    if (m.citations && m.citations.length) {
+      html += `<div class="citations"><span class="cite-label">来源引用</span>${m.citations.map(citeChipHTML).join('')}</div>`;
+    } else if (m.refusal) {
+      // R2-A1：拒答时引用为空是显式状态，不显示为空白，也不列出低相关命中
+      html += refusalCiteHTML();
+    } else if (!m.stopped) {
+      html += `<div class="no-cite-line">本次回答无来源引用（未从知识库召回相关资料）。</div>`;
+    }
+    html += `<div class="msg-actions"><button class="btn btn-ghost btn-sm" data-req="${esc(reqQ)}">重新提问</button></div>`;
+    return html;
+  }
+
+  /** 拒答引用状态（R2-A1）：明确说明为何没有引用，避免与“无召回”混淆。 */
+  function refusalCiteHTML() {
+    return `<div class="no-cite-line is-refusal">
+      <span class="t">本次未采用任何引用</span>
+      检索返回了高于召回阈值的候选，但模型判定证据不足以支撑回答，因此引用区为空。
+      <div class="refusal-why">该问题的低相关命中仅在「检索调试」页可见，不计入本次回答的来源。</div>
+    </div>`;
+  }
+
+  function renderMessages() {
+    const kb = currentKb();
+    const sess = currentSession();
+    msgArea.innerHTML = '';
+
+    if (!kb || kb.docCount === 0) {
+      msgArea.innerHTML = `<div class="chat-empty"><div class="inner">
+        <div class="empty-state" style="padding:0">
+          <div class="t">该知识库还没有文档</div>
+          <div class="d">「${esc(kb ? kb.name : '')}」暂无可检索内容，请先上传文档，完成解析入库后即可提问。</div>
+        </div>
+        <a class="btn btn-primary" href="docs.html?kb=${esc(state.kbId)}">前往上传文档</a>
+      </div></div>`;
+      chatTitle.textContent = kb ? kb.name : '';
+      chatCnt.textContent = '';
+      setComposerEnabled(false);
+      return;
+    }
+    setComposerEnabled(true);
+
+    if (!sess || !sess.messages.length) {
+      const samples = window.MockData.sampleQuestions[state.kbId] || [];
+      msgArea.innerHTML = `<div class="chat-empty"><div class="inner">
+        <div class="empty-state" style="padding:0">
+          <div class="t">${sess ? '开始新的会话' : '当前知识库暂无会话'}</div>
+          <div class="d">提问将只在「${esc(kb.name)}」范围内检索并回答，回答附带来源引用。</div>
+        </div>
+        ${chipsHTML(samples)}
+      </div></div>`;
+      msgArea.querySelectorAll('[data-q]').forEach((b) => b.addEventListener('click', () => { qInput.value = b.dataset.q; send(); }));
+      chatTitle.textContent = sess ? sess.title : '未选择会话';
+      chatCnt.textContent = '';
+      return;
+    }
+
+    chatTitle.textContent = sess.title;
+    chatCnt.textContent = `${sess.messages.length} 条消息`;
+    let lastUserQuestion = '';
+    sess.messages.forEach((m) => {
+      if (m.role === 'user') {
+        lastUserQuestion = m.content;
+        const w = document.createElement('div'); w.className = 'msg user';
+        w.innerHTML = `<div class="bubble">${esc(m.content)}</div>`;
+        msgArea.appendChild(w);
+      } else {
+        const w = document.createElement('div'); w.className = 'msg assistant';
+        w.innerHTML = `<div class="bubble"><div class="answer-text">${esc(m.content)}</div>${assistantBubbleHTML(m, lastUserQuestion)}</div>`;
+        msgArea.appendChild(w);
+      }
+    });
+    bindMessageActions();
+    msgArea.scrollTop = msgArea.scrollHeight;
+  }
+
+  /** 示例问题 chips；在 kb-pay 追加拒答演示入口（R2-A1）。 */
+  function chipsHTML(samples) {
+    const list = (samples || []).slice();
+    const d = window.MockData.refusalDemo;
+    if (d && d.kbId === state.kbId && list.indexOf(d.question) < 0) list.push(d.question);
+    if (!list.length) return '';
+    return `<div class="chip-row">${list.map((q) => {
+      const tag = (window.MockData.refusalDemo && q === window.MockData.refusalDemo.question)
+        ? '<span class="chip-tag">拒答演示</span>' : '';
+      return `<button class="q-chip" data-q="${esc(q)}">${esc(q)}${tag}</button>`;
+    }).join('')}</div>`;
+  }
+
+  function bindMessageActions() {    msgArea.querySelectorAll('[data-req]').forEach((b) => b.addEventListener('click', () => {
+      if (state.streaming) { toast('回答生成中，请先停止或等待完成', 'error'); return; }
+      const q = b.dataset.req;
+      const sess = currentSession();
+      if (!sess) return;
+      sess.messages.push({ role: 'user', content: q });
+      renderMessages();
+      runAsk(q);
+    }));
+    msgArea.querySelectorAll('.cite-chip').forEach((b) => b.addEventListener('click', () => openChunkDrawer(b.dataset.doc, b.dataset.chunk)));
+  }
+
+  msgArea.addEventListener('scroll', () => {
+    state.stick = msgArea.scrollHeight - msgArea.scrollTop - msgArea.clientHeight < 48;
+  });
+  function stickScroll() { if (state.stick) msgArea.scrollTop = msgArea.scrollHeight; }
+
+  function setComposerEnabled(on) {
+    qInput.disabled = !on; btnSend.disabled = !on;
+    qInput.placeholder = on ? '输入问题，Ctrl/Cmd + Enter 发送' : '该知识库暂无文档，上传后即可提问';
+    $('composer-hint').textContent = on
+      ? 'Ctrl/Cmd + Enter 发送 · 回答仅基于当前所选知识库的资料，引用可点开查看分块原文'
+      : '上传文档并完成解析入库后，即可在该知识库内提问';
+  }
+
+  function setComposerStreaming(on) {
+    btnSend.disabled = on || qInput.disabled;
+    btnStop.style.display = on ? '' : 'none';
+  }
+
+  /* ================= 引用 Drawer ================= */
+  function openChunkDrawer(docId, chunkId) {
+    const doc = window.MockUtil.doc(docId);
+    const chunk = window.MockUtil.chunksOf(docId).find((c) => c.id === chunkId);
+    const prevFocus = document.activeElement;
+    const meta = (k, v) => `<div class="field" style="margin-bottom:10px"><span class="label" style="font-size:13px;color:var(--muted-foreground)">${k}</span><span style="font-size:14px;line-height:20px;word-break:break-all">${v}</span></div>`;
+    const body = chunk ? `
+      ${meta('所属文档', esc(doc ? doc.name : ''))}
+      ${meta('标题路径', esc(chunk.titlePath))}
+      ${meta('页码', chunk.page != null ? `第 ${chunk.page} 页` : '未标注（正文型文档无固定页码）')}
+      ${meta('分块标识', esc(chunk.id))}
+      <div style="border-top:1px solid var(--border);margin:12px 0;padding-top:12px;font-size:15px;line-height:24px;white-space:pre-wrap;word-break:break-word">${esc(chunk.text)}</div>
+      <a href="doc-detail.html?doc=${encodeURIComponent(docId)}&chunk=${encodeURIComponent(chunkId)}">查看完整文档 →</a>`
+      : '<div class="alert alert-info">该分块内容未预置（演示数据仅含部分文档的完整分块）。</div>';
+    SupieUI.openDrawer({
+      title: '引用分块原文',
+      bodyHTML: body,
+      onClose: () => { if (prevFocus && prevFocus.focus) prevFocus.focus(); },
+    });
+  }
+
+  /* ================= 回答计划解析 ================= */
+  function resolvePlan(question) {
+    const kb = currentKb();
+    // R2-A1 拒答语义：检索确有高于阈值的命中，但证据不足以支撑回答 → 拒答且清空引用。
+    // （与下面的 outOfScope 区分：outOfScope 是“根本没有命中超过阈值”）
+    if (norm(question) === norm(REFUSAL_QUESTION)) {
+      const d = window.MockData.refusalDemo;
+      return {
+        refusal: true,
+        content: d.answer,
+        citations: [],
+        hits: d.hits.length,
+        threshold: d.threshold,
+        topScore: Math.max.apply(null, d.hits.map((h) => h.score)),
+        debugNote: d.debugNote,
+        totalMs: 96,
+        llmMs: 2380,
+      };
+    }
+    if (state.demo.noCite || OUTSIDE_RE.test(question)) {
+      return {
+        outOfScope: true,
+        content: `无法依据当前资料回答。\n\n本次检索最高相似度 0.221，低于召回阈值 0.30，未构造生成上下文。当前知识库「${kb.name}」中未找到与该问题相关的资料；请确认问题是否在知识库范围内，或先上传相关文档。`,
+      };
+    }
+    const map = ANSWERS[state.kbId] || {};
+    let entry = map[question];
+    if (!entry) {
+      const key = Object.keys(map).find((k) => k !== '__fallbackKey' && norm(k) === norm(question));
+      entry = key ? map[key] : map[map.__fallbackKey];
+      if (!key) entry = Object.assign({}, entry, { demoNote: true });
+    }
+    // 优先使用 debugScenarios 中同源的真实阶段耗时
+    const run = (window.MockData.debugScenarios[state.kbId] || {}).runs[question];
+    if (run && run.timings) {
+      entry = Object.assign({}, entry, { hits: run.hits.length, totalMs: run.timings.totalMs, llmMs: run.timings.llmTotalMs || entry.llmMs });
+    }
+    return entry;
+  }
+
+  /* ================= 流式回答流程（SSE 模拟） ================= */
+  function buildAssistantBubble() {
+    const w = document.createElement('div'); w.className = 'msg assistant';
+    const b = document.createElement('div'); b.className = 'bubble';
+    const stageBox = document.createElement('div'); stageBox.className = 'stage-box';
+    const ans = document.createElement('div'); ans.className = 'answer-text'; ans.style.display = 'none';
+    const extra = document.createElement('div');
+    b.appendChild(stageBox); b.appendChild(ans); b.appendChild(extra);
+    w.appendChild(b); msgArea.appendChild(w); stickScroll();
+    return { w, b, stageBox, ans, extra };
+  }
+
+  function stageLine(box, text) {
+    const l = document.createElement('div'); l.className = 'stage-line';
+    l.innerHTML = `<span class="spinner"></span><span>${esc(text)}</span>`;
+    box.appendChild(l); stickScroll();
+    return l;
+  }
+  function stageDone(l, text) { l.innerHTML = `<span class="done">✓</span><span>${esc(text)}</span>`; }
+  function stageFail(l, text) { l.innerHTML = `<span class="fail">✕</span><span>${esc(text)}</span>`; }
+
+  function showAskError(ui, msg, question) {
+    state.streaming = null; setComposerStreaming(false);
+    const err = document.createElement('div'); err.className = 'ask-error';
+    err.innerHTML = `<span>${esc(msg)}</span><button class="btn btn-outline btn-sm" data-retry>重试</button>`;
+    err.querySelector('[data-retry]').addEventListener('click', () => {
+      if (state.streaming) return;
+      ui.w.remove(); // 仅移除失败的回答块，用户消息与输入保留
+      runAsk(question);
+    });
+    ui.extra.appendChild(err); stickScroll();
+  }
+
+  function typewriter(ui, full) {
+    ui.ans.style.display = 'block';
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let i = 0;
+    return new Promise((resolve) => {
+      const timer = setInterval(() => {
+        if (state.streaming && state.streaming.stopped) { clearInterval(timer); resolve({ interrupted: 'stop' }); return; }
+        if (state.demo.streamBreak && full.length > 40 && i / full.length >= 0.35) { clearInterval(timer); resolve({ interrupted: 'break' }); return; }
+        i += reduced ? full.length : 4 + Math.floor(Math.random() * 8);
+        if (i >= full.length) { ui.ans.textContent = full; stickScroll(); clearInterval(timer); resolve({}); return; }
+        ui.ans.textContent = full.slice(0, i);
+        stickScroll();
+      }, 150); // 打字机节奏 150ms/步，符合 120–220ms 区间
+      if (state.streaming) state.streaming.timer = timer;
+    });
+  }
+
+  function stopStreaming() {
+    if (!state.streaming) return;
+    state.streaming.stopped = true;
+  }
+  btnStop.addEventListener('click', stopStreaming);
+
+  async function runAsk(question) {
+    const kb = currentKb();
+    state.streaming = { question, stopped: false };
+    state.stick = true;
+    setComposerStreaming(true);
+
+    const ui = buildAssistantBubble();
+    const s1 = stageLine(ui.stageBox, `检索知识库：${kb.name}（top 5）…`);
+    await delay(700 + Math.floor(Math.random() * 250));
+
+    // —— 检索失败（演示开关）——
+    if (state.demo.retrievalFail) {
+      stageFail(s1, '检索失败：检索服务暂不可用');
+      showAskError(ui, '检索失败：暂时无法获取知识库检索结果。你的问题已保留，可点击重试。', question);
+      return;
+    }
+
+    const plan = resolvePlan(question);
+
+    if (plan.outOfScope) {
+      stageDone(s1, '完成 · 命中 1 块 · 最高相似度 0.221 低于阈值 0.30，已全部过滤');
+      const s2 = stageLine(ui.stageBox, '生成回答…');
+      await delay(600);
+      if (state.streaming.stopped) { finalizeStop(ui, s2, '', question); return; }
+      stageDone(s2, '完成 · 未构造生成上下文，明确回复无法回答');
+      const res = await typewriter(ui, plan.content);
+      if (res.interrupted === 'stop') { finalizeStop(ui, s2, ui.ans.textContent, question); return; }
+      if (res.interrupted === 'break') {
+        stageFail(s2, 'SSE 流中断（error 事件）');
+        showAskError(ui, 'SSE 流中断：与生成服务的连接意外断开，已生成内容已保留，可重试。', question);
+        return;
+      }
+      ui.extra.innerHTML = '<div class="no-cite-line">本次回答无来源引用（未从知识库召回相关资料）。</div>' + actionHTML(question);
+      bindExtras(ui);
+      finish(ui);
+      return;
+    }
+
+    // —— R2-A1 拒答路径：检索确有高于阈值的命中，但证据不足 → 拒答且清空引用 ——
+    if (plan.refusal) {
+      stageDone(s1, `完成 · 命中 ${plan.hits} 块 · 最高相似度 ${plan.topScore.toFixed(3)} 高于阈值 ${plan.threshold.toFixed(2)}`);
+      const s2 = stageLine(ui.stageBox, '生成回答…');
+      await delay(600);
+      if (state.streaming.stopped) { finalizeStop(ui, s2, '', question); return; }
+      const res0 = await typewriter(ui, plan.content);
+      if (res0.interrupted === 'stop') { finalizeStop(ui, s2, ui.ans.textContent, question); return; }
+      if (res0.interrupted === 'break') {
+        stageFail(s2, 'SSE 流中断（error 事件）');
+        showAskError(ui, 'SSE 流中断：与生成服务的连接意外断开，已生成内容已保留，可重试。', question);
+        return;
+      }
+      stageDone(s2, '完成 · 证据不足，已拒答并清空引用');
+      ui.extra.innerHTML = refusalCiteHTML() + actionHTML(question);
+      bindExtras(ui);
+      const rsess = currentSession();
+      if (rsess) rsess.messages.push({ role: 'assistant', content: plan.content, citations: [], refusal: true, question });
+      finish(ui);
+      return;
+    }
+
+    // —— 正常路径 ——
+    stageDone(s1, `完成 · 命中 ${plan.hits} 块 · ${plan.totalMs}ms`);
+    const s2 = stageLine(ui.stageBox, '生成回答…');
+
+    // —— 模型服务超时（演示开关）：生成阶段卡住后报错 ——
+    if (state.demo.timeout) {
+      await delay(2200);
+      if (state.streaming.stopped) { finalizeStop(ui, s2, '', question); return; }
+      showAskError(ui, '模型服务超时（演示）：生成阶段长时间无响应。已生成内容已保留，可重试。', question);
+      return;
+    }
+
+    const res = await typewriter(ui, plan.content);
+    if (res.interrupted === 'stop') { finalizeStop(ui, s2, ui.ans.textContent, question); return; }
+    if (res.interrupted === 'break') {
+      stageFail(s2, 'SSE 流中断（error 事件）');
+      showAskError(ui, 'SSE 流中断：与生成服务的连接意外断开，已生成内容已保留，可重试。', question);
+      return;
+    }
+    stageDone(s2, `完成 · 回答生成用时 ${(plan.llmMs / 1000).toFixed(1)}s`);
+    let extraHTML = '';
+    if (plan.demoNote) extraHTML += '<div class="demo-note">演示说明：该问题未预置独立回答，此处复用最接近的预置回答与引用。</div>';
+    if (plan.citations && plan.citations.length) {
+      extraHTML += `<div class="citations"><span class="cite-label">来源引用</span>${plan.citations.map(citeChipHTML).join('')}</div>`;
+    }
+    extraHTML += actionHTML(question);
+    ui.extra.innerHTML = extraHTML;
+    bindExtras(ui);
+
+    const sess = currentSession();
+    if (sess) sess.messages.push({ role: 'assistant', content: plan.content, citations: plan.citations, demoNote: !!plan.demoNote, question });
+    finish(ui);
+  }
+
+  function actionHTML(question) {
+    return `<div class="msg-actions"><button class="btn btn-ghost btn-sm" data-req="${esc(question)}">重新提问</button></div>`;
+  }
+  function bindExtras(ui) {
+    ui.extra.querySelectorAll('[data-req]').forEach((b) => b.addEventListener('click', () => {
+      if (state.streaming) { toast('回答生成中，请先停止或等待完成', 'error'); return; }
+      const q = b.dataset.req;
+      const sess = currentSession();
+      if (!sess) return;
+      sess.messages.push({ role: 'user', content: q });
+      renderMessages();
+      runAsk(q);
+    }));
+    ui.extra.querySelectorAll('.cite-chip').forEach((b) => b.addEventListener('click', () => openChunkDrawer(b.dataset.doc, b.dataset.chunk)));
+  }
+  function finalizeStop(ui, s2line, partial, question) {
+    if (s2line) s2line.innerHTML = '<span>已手动停止</span>';
+    state.streaming = null; setComposerStreaming(false);
+    const note = document.createElement('div'); note.className = 'stream-note';
+    note.textContent = '已手动停止，以上为已生成内容；本次未生成来源引用。';
+    ui.extra.appendChild(note);
+    const act = document.createElement('div'); act.className = 'msg-actions';
+    act.innerHTML = `<button class="btn btn-ghost btn-sm" data-req="${esc(question)}">重新提问</button>`;
+    ui.extra.appendChild(act);
+    bindExtras(ui);
+    const sess = currentSession();
+    if (sess && partial) sess.messages.push({ role: 'assistant', content: partial, stopped: true, question });
+  }
+  function finish(ui) { state.streaming = null; setComposerStreaming(false); }
+
+  /* ================= 发送 ================= */
+  function send() {
+    if (state.streaming) { toast('回答生成中，请先等待完成或点击停止', 'error'); return; }
+    const kb = currentKb();
+    if (!kb || kb.docCount === 0) return;
+    const q = qInput.value.trim();
+    if (!q) { qInput.focus(); return; }
+    let sess = currentSession();
+    if (!sess) {
+      sess = { id: window.MockUtil.uid('sess'), kbId: state.kbId, title: q.length > 14 ? q.slice(0, 14) + '…' : q, createdAt: nowStr(), messages: [] };
+      window.MockData.sessions.unshift(sess);
+      state.sessionId = sess.id;
+      renderSessionList();
+    } else if (sess.messages.length === 0) {
+      sess.title = q.length > 14 ? q.slice(0, 14) + '…' : q;
+    }
+    sess.messages.push({ role: 'user', content: q });
+    qInput.value = ''; autoGrow();
+    renderMessages();
+    runAsk(q);
+  }
+
+  btnSend.addEventListener('click', send);
+  qInput.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); send(); }
+  });
+  function autoGrow() { qInput.style.height = 'auto'; qInput.style.height = Math.min(qInput.scrollHeight, 132) + 'px'; }
+  qInput.addEventListener('input', autoGrow);
+
+  /* ================= 全量渲染 ================= */
+  function renderAll() {
+    renderSessionList();
+    renderMessages();
+  }
+
+  /* ================= 演示控制（侧栏底部，默认收起） ================= */
+  SupieUI.initProtoTools([
+    { label: '模拟检索失败', control: '<input type="checkbox" id="demo-fail-retrieval" aria-label="模拟检索失败">' },
+    { label: '模拟模型超时', control: '<input type="checkbox" id="demo-fail-timeout" aria-label="模拟模型超时">' },
+    { label: '模拟流中断', control: '<input type="checkbox" id="demo-fail-break" aria-label="模拟流中断">' },
+    { label: '模拟无引用回答', control: '<input type="checkbox" id="demo-no-cite" aria-label="模拟无引用回答">' },
+    { label: '首屏加载骨架', control: { type: 'button', text: '重新演示', onClick: () => showLoadingDemo(1200) } },
+    { label: '标题路径修复对照', control: { type: 'button', text: '查看', onClick: showTitlePathFix } },
+    { label: '会话演示数据', control: { type: 'button', text: '重置', onClick: resetDemoData } },
+  ]);
+  $('demo-fail-retrieval').addEventListener('change', (e) => { state.demo.retrievalFail = e.target.checked; });  $('demo-fail-timeout').addEventListener('change', (e) => { state.demo.timeout = e.target.checked; });
+  $('demo-fail-break').addEventListener('change', (e) => { state.demo.streamBreak = e.target.checked; });
+  $('demo-no-cite').addEventListener('change', (e) => { state.demo.noCite = e.target.checked; });
+
+  function showLoadingDemo(ms) {
+    if (state.streaming) { toast('回答生成中，请先停止或等待完成', 'error'); return; }
+    state.loading = true; renderSessionList();
+    setTimeout(() => { state.loading = false; renderSessionList(); }, ms);
+  }
+
+  /* R2-T1：标题路径修复对照（引用条/分块预览不再出现重复标题编号）。 */
+  function showTitlePathFix() {
+    const fix = window.MockData.titlePathFixDemo;
+    if (!fix) return;
+    const row = (k, v, mark) => `<div class="field" style="margin-bottom:10px">
+      <span class="label" style="font-size:13px;color:var(--muted-foreground)">${k}</span>
+      <span style="font-size:14px;line-height:20px;word-break:break-all">${mark ? esc(v).replace(esc(mark), `<span style="color:var(--destructive);text-decoration:line-through">${esc(mark)}</span>`) : esc(v)}</span>
+    </div>`;
+    SupieUI.openDrawer({
+      title: '标题路径修复对照（第二轮）',
+      bodyHTML: `
+        ${row('修复前', fix.before, '6. ')}
+        ${row('修复后', fix.after, null)}
+        <div style="font-size:13px;color:var(--muted-foreground);line-height:19px">${esc(fix.note)}</div>`,
+    });
+  }
+
+  function resetDemoData() {
+    if (state.streaming) stopStreaming();
+    window.MockData.sessions.length = 0;
+    originalSessions.forEach((s) => window.MockData.sessions.push(JSON.parse(JSON.stringify(s))));
+    const list = sessionsFor(state.kbId);
+    state.sessionId = list.length ? list[0].id : null;
+    renderAll();
+    SupieUI.toast('已重置会话演示数据', 'success');
+  }
+
+  /* ================= 外壳与初始化 ================= */
+  SupieUI.initShell('chat');
+
+  const params = new URLSearchParams(location.search);
+  const kbParam = params.get('kb');
+  const kbIds = window.MockData.knowledgeBases.map((k) => k.id);
+  state.kbId = kbIds.includes(kbParam) ? kbParam : 'kb-pay';
+
+  const list0 = sessionsFor(state.kbId);
+  state.sessionId = list0.length ? list0[0].id : null;
+
+  // 首屏 loading：会话列表骨架
+  state.loading = true;
+  renderKBSelect(); renderMessages(); renderSessionList();
+  setTimeout(() => { state.loading = false; renderSessionList(); }, 600);
+})();
+</script>
+</body>
+</html>

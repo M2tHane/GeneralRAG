@@ -1,0 +1,18 @@
+name: python-fastapi-react
+backend:
+  language: python
+  framework: fastapi
+  package_manager: uv
+  test: [pytest]
+  security_scan: [bandit, pip-audit, semgrep]
+frontend:
+  language: typescript
+  framework: react
+  package_manager: auto
+  test: [vitest, playwright]
+database:
+  engine: postgresql
+  migration: alembic
+contract:
+  api: contracts/openapi.yaml
+  format: openapi-3.1

@@ -1,0 +1,22 @@
+name: java-spring-react
+backend:
+  language: java
+  framework: spring-boot
+  build:
+    preferred: maven
+    alternatives: [gradle]
+  test: [junit5, mockito, testcontainers]
+  security_scan: [spotbugs, findsecbugs, dependency-check, semgrep]
+frontend:
+  language: typescript
+  framework: react
+  package_manager: auto
+  test: [vitest, playwright]
+database:
+  engine: postgresql
+  migration: flyway
+contract:
+  api: contracts/openapi.yaml
+  format: openapi-3.1
+  recommended_backend_sync: springdoc-openapi
+  recommended_frontend_codegen: openapi-typescript

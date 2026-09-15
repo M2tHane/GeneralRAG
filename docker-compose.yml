@@ -1,0 +1,84 @@
+# =====================================================================
+# rag-server 本地依赖：MySQL 8 / Elasticsearch 8.14.1(含 IK 分词插件) / MinIO
+# 启动：docker compose up -d
+# 凭据均为本地开发默认值，生产部署请另行配置。
+# =====================================================================
+services:
+  mysql:
+    image: mysql:8
+    container_name: rag-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root-pass
+      MYSQL_DATABASE: rag
+      MYSQL_USER: rag
+      MYSQL_PASSWORD: rag-pass
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot-pass"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  elasticsearch:
+    # 方案：以官方 elasticsearch:8.14.1 基础镜像 + 启动时安装 analysis-ik 插件。
+    # 说明：国内常用含 IK 的第三方镜像（如 elasticsearch-with-ik）更新滞后且来源不可控，
+    # 这里选择可靠路径：官方镜像 entrypoint 前通过 command 安装插件（首次启动多花 1-2 分钟，
+    # 插件装进镜像层，重启容器不重复下载）。若安装失败（无外网），把
+    # application.yaml 的 rag.elasticsearch.content-analyzer 改为 standard 并如实记录。
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.1
+    container_name: rag-es
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    entrypoint: >
+      bash -c "
+        if ! elasticsearch-plugin list | grep -q analysis-ik; then
+          echo 'Installing analysis-ik plugin...' &&
+          elasticsearch-plugin install --batch https://get.infini.cloud/elasticsearch/analysis-ik/8.14.1 ;
+        fi ;
+        /usr/local/bin/docker-entrypoint.sh elasticsearch
+      "
+    ports:
+      - "9200:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
+
+  minio:
+    image: minio/minio:latest
+    container_name: rag-minio
+    # 凭据可通过环境变量覆盖：MINIO_ROOT_USER / MINIO_ROOT_PASSWORD
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web 控制台
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+volumes:
+  mysql-data:
+  es-data:
+  minio-data:

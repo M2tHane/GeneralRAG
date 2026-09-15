@@ -1,0 +1,159 @@
+{
+  "schema": 1,
+  "flow": "supie-dev",
+  "mode": "standard",
+  "status": "completed",
+  "goal": "基于 Java (Spring Boot/LangChain4j/ES/MySQL/MinIO) 的知识问答 RAG 第一版",
+  "baseline": "n/a",
+  "current_stage": 6,
+  "stages": {
+    "1": {
+      "status": "completed",
+      "approved": true,
+      "artifact": "docs/01-需求理解.md",
+      "note": "用户通过启动提示词直接确认需求，未执行需求访谈与评审；本文档为已批准需求基线"
+    },
+    "2": {
+      "status": "completed",
+      "approved": true,
+      "artifact": "prototype/index.html",
+      "note": "UX APPROVED：用户明确回复「原型通过」；设计决策与走查记录见 prototype/DESIGN.md"
+    },
+    "3": {
+      "status": "completed",
+      "approved": true,
+      "artifact": "docs/03-技术路线.md + contracts/openapi.yaml",
+      "note": "用户明确回复「我批准」；7 项契约语义决策一并批准"
+    },
+    "4": {
+      "status": "skipped",
+      "note": "用户在启动提示词中明确 Stage 4 默认跳过"
+    },
+    "5": {
+      "status": "in_progress",
+      "note": "Flyway V1 建库脚本（MySQL 8）"
+    },
+    "6": {
+      "status": "in_progress",
+      "note": "6.2 实现完成（T1–T8），进入 6.3 独立评审"
+    }
+  },
+  "tasks": {
+    "stage2-review": {
+      "status": "completed",
+      "note": "Stage 2C page-walker/layout-reviewer 由主 Agent 浏览器执行完成"
+    },
+    "plan-review": {
+      "status": "completed",
+      "note": "plan-document-reviewer: APPROVE-WITH-FIXES；G1/G2/G4/G5 已修复写入计划，G3 与建议项在执行中吸收"
+    },
+    "impl-plan": {
+      "status": "completed",
+      "note": "docs/06-实现计划.md 定稿（9 个任务，P1–P6 阶段）"
+    },
+    "stage5-flyway-v1": {
+      "status": "completed",
+      "note": "V1__init.sql 11 表，mysql:8 容器实测：唯一约束/级联/CHECK 生效"
+    },
+    "T1-backend-skeleton": {
+      "status": "completed",
+      "note": "pom/RagProperties/错误体系/docker-compose；mvn compile + RagPropertiesTest 5/5 通过；langchain4j 锁 1.0.1（jackson 兼容）"
+    },
+    "T2-storage": {
+      "status": "completed",
+      "note": "StorageIT 6/6 通过（mysql+minio+ES 真容器）；修复：Testcontainers 1.21.4（Docker 29 兼容）、ES 镜像改 docker.elastic.co、MinIO recursive 删除、CAS/事务断言"
+    },
+    "T3-ingestion": {
+      "status": "completed"
+    },
+    "T5-retrieval-llm": {
+      "status": "completed"
+    },
+    "T4-api": {
+      "status": "completed",
+      "note": "42/42（40 WebMvcTest + DocumentFlowIT 2）；afterCommit 入队修复任务卡 QUEUED；补启动期 ensureIndex 钩子"
+    },
+    "T6-debug-eval": {
+      "status": "completed",
+      "note": "18/18 通过（解析器 12 + EvalFlowIT 5 + DebugConsistencyIT 1）；debug 分段计时用同组件复刻语义 + 一致性 IT 守护"
+    },
+    "T7-contract-drift": {
+      "status": "completed",
+      "note": "漂移测试抓到并修复：qa 控制器整体缺失（正式 QaController 补上）、8 处 operationId、6 处成功状态码声明；全量 109/109"
+    },
+    "review-spec": {
+      "status": "completed",
+      "note": "PASS-WITH-FIXES：0 BLOCKER / 4 MAJOR / 11 MINOR"
+    },
+    "review-quality": {
+      "status": "completed",
+      "note": "PASS-WITH-FIXES：2 BLOCKER / 7 MAJOR / 7 MINOR；B1 删除竞态、B2 SSE 收尾泄漏"
+    },
+    "review-fixes": {
+      "status": "completed",
+      "note": "B1 删除竞态（updateStage 返回值+existsById 双保险）、B2 SSE 终态 try/finally、M1 attempts 覆盖、M3 策略白名单、M4 事务外 MinIO、M5 请求校验、M6 评测 CAS+启动恢复+失败题口径、M7 afterCommit 兜底、spec M2 快照分块配置/M3 类型不一致拒绝/M4 Error 补全；回归 109/109"
+    },
+    "T9-e2e": {
+      "status": "completed",
+      "note": "真实中间件+E2E API/浏览器走查通过（无模型场景按设计降级）；README 启动文档完成"
+    },
+    "T9-report": {
+      "status": "completed",
+      "note": "docs/06-测试报告.html 已产出（分层证据/需求对照/未验证项/诚实性声明）"
+    }
+  },
+  "verification": [
+    {
+      "label": "prototype-walkthrough",
+      "result": "pass",
+      "at": "2026-09-13T23:03:50+08:00",
+      "command": "browser walkthrough via http://localhost:8765 (kb/docs/doc-detail/chat/debug)",
+      "note": "交互走查+三视口布局评审通过；修复演示面板遮挡与 hidden 属性覆盖两处缺陷"
+    },
+    {
+      "label": "openapi-contract-check",
+      "result": "pass",
+      "at": "2026-09-13T23:30:21+08:00",
+      "command": "ruby YAML parse + ref integrity + operationId uniqueness on contracts/openapi.yaml",
+      "note": "18 paths / 52 schemas / 27 operations / 169 refs 全部可解析；无 openapi-spec-validator，已用 ruby Psych 做语法与引用完整性替代校验"
+    },
+    {
+      "label": "backend-full-suite",
+      "result": "pass",
+      "at": "2026-09-14T14:14:16+08:00",
+      "command": "mvn test (48 tests: 单测 + StorageIT/QaStreamIT/IngestionPipelineIT via Testcontainers)",
+      "note": "T3/T5 完成；修复：StageFlow QUEUED 起步、续跑重建分块 NPE、MinIO recursive、FakeOpenAiServer Map.of NPE、断连终态探测；surefire 补 IT include"
+    },
+    {
+      "label": "backend-full-suite-v2",
+      "result": "pass",
+      "at": "2026-09-14T14:58:47+08:00",
+      "command": "mvn test → 108/108（含 5 个 Testcontainers IT）",
+      "note": "T1–T6+T8 全部实现，后端全量绿"
+    },
+    {
+      "label": "review-fix-regression",
+      "result": "pass",
+      "at": "2026-09-14T16:57:57+08:00",
+      "command": "mvn test → 109/109"
+    },
+    {
+      "label": "e2e-verification",
+      "result": "pass",
+      "at": "2026-09-14T17:21:44+08:00",
+      "command": "真实启动 rag-server+rag-web+docker compose；curl 旅程 + in-app browser 走查 + SSE 抓包",
+      "note": "ES 补偿清理收敛（count=0）；SSE 终态契约实测"
+    },
+    {
+      "label": "real-eval-baseline",
+      "result": "pass",
+      "at": "2026-09-14T18:34:16+08:00",
+      "command": "真实评测：调优集 6 题 Hit@1/3/5=1.00 avg 2782ms；独立测试集 10 题 Hit@1/3/5=1.00 avg 4732ms（qwen3.7-text-embedding + deepseek-v4-flash-0731，STRUCTURE/800，topK=6，minScore=0.30）",
+      "note": "小库冒烟基线；发现 3 个真实调优点记入第二轮：OUT_OF_KB 题引用未清空、标题编号重复、长题延迟"
+    }
+  ],
+  "started_at": "2026-09-13T22:01:55+08:00",
+  "updated_at": "2026-09-14T18:34:39+08:00",
+  "finished_at": "2026-09-14T18:34:39+08:00",
+  "finish_note": "第一轮完成：实现（T1-T9）+双评审+修复回归 109/109+真实模型评测基线；全部产物落盘。第二轮/第三轮按路线图另行立项（需确认关口）"
+}

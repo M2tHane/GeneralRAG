@@ -1,0 +1,5 @@
+interface:
+  display_name: "Supie Edit"
+  short_description: "Scoped feature changes with fast/standard/strict risk modes"
+policy:
+  allow_implicit_invocation: false

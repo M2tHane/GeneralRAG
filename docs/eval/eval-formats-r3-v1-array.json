@@ -1,0 +1,144 @@
+[
+ {
+  "question": "nginx 的 proxy_read_timeout 默认是多少秒？超时后会发生什么？",
+  "referenceAnswer": "默认 60s。它是两次成功读操作之间的最大间隔，超时后 nginx 关闭连接。",
+  "evidence": [
+   {
+    "docName": "nginx-proxy-guide.docx",
+    "titlePath": "nginx-proxy-guide.docx > 1.2. 关键超时参数",
+    "chunkId": "73af72af-1d42-46d3-86ba-048c067caf12-c0003",
+    "contentHash": "0ed541d440505063",
+    "page": null,
+    "snippet": "proxy_read_timeout：两次成功读操作之间的最大间隔，默认 60s，超时则关闭连接"
+   }
+  ],
+  "answerable": true,
+  "category": "DIRECT"
+ },
+ {
+  "question": "Word 语料里写的 proxy_buffering 默认值是什么？",
+  "referenceAnswer": "默认 on：开启后端响应缓冲。",
+  "evidence": [
+   {
+    "docName": "nginx-proxy-guide.docx",
+    "titlePath": "nginx-proxy-guide.docx > 1.3. 常用参数速查表",
+    "chunkId": "73af72af-1d42-46d3-86ba-048c067caf12-c0004",
+    "contentHash": "61140b76b88c087a",
+    "page": null,
+    "snippet": "proxy_buffering | on | 开启后端响应缓冲"
+   }
+  ],
+  "answerable": true,
+  "category": "DIRECT"
+ },
+ {
+  "question": "响应体超过 proxy_buffers 总量时会怎样？",
+  "referenceAnswer": "超出部分写入临时文件（proxy_max_temp_file_size，默认 1024m）；设为 0 禁用临时文件，超出部分同步转发给客户端并阻塞读取后端。",
+  "evidence": [
+   {
+    "docName": "nginx-proxy-guide.docx",
+    "titlePath": "nginx-proxy-guide.docx > 1.1.1. 缓冲区大小溢出行为",
+    "chunkId": "73af72af-1d42-46d3-86ba-048c067caf12-c0002",
+    "contentHash": "932efeadd83e247d",
+    "page": null,
+    "snippet": "响应体超过 proxy_buffers 总量时，超出部分写入临时文件"
+   }
+  ],
+  "answerable": true,
+  "category": "DIRECT"
+ },
+ {
+  "question": "HikariCP 的 idleTimeout 默认是多少？",
+  "referenceAnswer": "600000 ms（10 分钟）。",
+  "evidence": [
+   {
+    "docName": "hikari-cp-reference.xlsx",
+    "titlePath": "hikari-cp-reference.xlsx > 0.1. 参数说明",
+    "chunkId": "d8971c7b-6027-442e-8b7f-8934ab23f849-c0000",
+    "contentHash": "373e8ed887d58b2b",
+    "page": null,
+    "snippet": "连接池 | idleTimeout | 600000 ms | 重启生效"
+   }
+  ],
+  "answerable": true,
+  "category": "DIRECT"
+ },
+ {
+  "question": "高吞吐 OLTP 场景建议把 HikariCP 最大池设到多大？",
+  "referenceAnswer": "建议 40；超过 40 后加大池收益递减，应优先优化慢 SQL。",
+  "evidence": [
+   {
+    "docName": "hikari-cp-reference.xlsx",
+    "titlePath": "hikari-cp-reference.xlsx > 0.3. 容量估算",
+    "chunkId": "d8971c7b-6027-442e-8b7f-8934ab23f849-c0002",
+    "contentHash": "00561b8890a44edb",
+    "page": null,
+    "snippet": "高吞吐 OLTP | 500 | 40 | 超过 40 后加大池收益递减"
+   }
+  ],
+  "answerable": true,
+  "category": "TERM_VARIATION"
+ },
+ {
+  "question": "Communications link failure 一般是什么原因，怎么处置？",
+  "referenceAnswer": "连接存活超过服务端 wait_timeout；把 maxLifetime 设为小于 MySQL wait_timeout 的值。",
+  "evidence": [
+   {
+    "docName": "hikari-cp-reference.xlsx",
+    "titlePath": "hikari-cp-reference.xlsx > 0.2. 常见问题",
+    "chunkId": "d8971c7b-6027-442e-8b7f-8934ab23f849-c0001",
+    "contentHash": "8e501f8d54969734",
+    "page": null,
+    "snippet": "Communications link failure | 连接存活超过服务端 wait_timeout"
+   }
+  ],
+  "answerable": true,
+  "category": "DIRECT"
+ },
+ {
+  "question": "Kafka 消费者报 OFFSET_OUT_OF_RANGE 是什么意思？",
+  "referenceAnswer": "请求的位移超出分区现有位移范围；常见于消费者离线过久、位移被删、日志保留期触发清理；按 auto.offset.reset 策略重置位移。",
+  "evidence": [
+   {
+    "docName": "kafka-error-codes.csv",
+    "titlePath": "kafka-error-codes.csv",
+    "chunkId": "1185a098-df66-42b9-a0b4-6a5ef2b28f88-c0000",
+    "contentHash": "d6170700f185fbe8",
+    "page": null,
+    "snippet": "OFFSET_OUT_OF_RANGE,消费端,请求的位移超出分区现有位移范围"
+   }
+  ],
+  "answerable": true,
+  "category": "DIRECT"
+ },
+ {
+  "question": "Kafka 生产端报 MESSAGE_TOO_LARGE 应该怎么处理？",
+  "referenceAnswer": "调大 topic 的 max.message.bytes 或拆分消息。",
+  "evidence": [
+   {
+    "docName": "kafka-error-codes.csv",
+    "titlePath": "kafka-error-codes.csv",
+    "chunkId": "1185a098-df66-42b9-a0b4-6a5ef2b28f88-c0000",
+    "contentHash": "d6170700f185fbe8",
+    "page": null,
+    "snippet": "MESSAGE_TOO_LARGE,生产端,消息超过 max.message.bytes"
+   }
+  ],
+  "answerable": true,
+  "category": "CONFUSABLE"
+ },
+ {
+  "question": "Nginx 开源版怎么做主动健康检查？",
+  "referenceAnswer": "资料外：语料只说明主动健康检查是商业版功能，未提供开源版实现方法。",
+  "evidence": [],
+  "answerable": false,
+  "category": "OUT_OF_KB"
+ },
+ {
+  "question": "HikariCP 的最大空闲连接数怎么设置？",
+  "referenceAnswer": "资料外：语料参数表只有 minimumIdle（最小空闲），没有最大空闲连接数参数。",
+  "evidence": [],
+  "answerable": false,
+  "category": "OUT_OF_KB"
+ }
+]

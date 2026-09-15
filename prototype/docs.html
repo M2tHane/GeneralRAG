@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>文档管理 · 通用知识问答 RAG 原型</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  /* 页面私有样式：仅作用于本页 */
+  table.table { min-width: 820px; }
+  .content-inner.page-fill { height: 100%; min-height: 0; }
+  #page-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .table-wrap.fill { flex: 1; min-height: 180px; overflow: auto; }
+  #pagination { padding: 12px 2px 0; margin-top: 0; }
+  .fail-reason {
+    margin-top: 6px; font-size: 13px; line-height: 18px; font-weight: 500;
+    color: var(--destructive); display: flex; align-items: flex-start; gap: 4px; max-width: 320px;
+  }
+  .fail-reason svg { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+  .row-menu {
+    position: absolute; right: 0; top: 34px; z-index: 40; min-width: 96px; padding: 4px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-pop); display: flex; flex-direction: column;
+  }
+  .row-menu button {
+    border: none; background: none; text-align: left; padding: 8px 10px; font-size: 14px;
+    font-family: inherit; cursor: pointer; border-radius: 4px; color: var(--foreground);
+  }
+  .row-menu button:hover { background: var(--muted); }
+  .row-menu button.danger { color: var(--destructive); }
+  .impact-list { margin: 8px 0; padding-left: 20px; font-size: 14px; line-height: 22px; }
+  .impact-list li { margin-bottom: 4px; }
+  .kb-del-note { font-size: 13px; color: var(--muted-foreground); margin: 8px 0 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="sidebar-scrim" id="sidebar-scrim"></div>
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" id="menu-btn" aria-label="打开导航">☰</button>
+      <div class="crumb"><a href="kb.html">知识库</a><span>/</span><b id="crumb-kb">…</b></div>
+    </header>
+    <main class="content">
+      <div class="content-inner page-fill">
+        <div class="page-header" id="page-header">
+          <div>
+            <a class="back-link" href="kb.html">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+              返回知识库列表
+            </a>
+            <h1 id="page-title">文档管理</h1>
+            <div class="sub" id="page-sub"></div>
+          </div>
+          <div class="actions" id="header-actions"></div>
+        </div>
+        <div id="page-body"></div>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="ui.js"></script>
+<script src="data.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, el) { return (el || document).querySelector(s); };
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function nowStr() {
+    var d = new Date();
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+  function fmtDate(d) {
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+  function fmtSize(kbNum) { return kbNum >= 1024 ? (kbNum / 1024).toFixed(1) + ' MB' : kbNum + ' KB'; }
+  function genHash() {
+    return 'sha256:' + Math.random().toString(16).slice(2, 8) + '…' + Math.random().toString(16).slice(2, 6);
+  }
+  var icoAlert = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
+  var icoPlus = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+
+  var PROCESSING_STATUSES = ['queued', 'parsing', 'cleaning', 'chunking', 'embedding', 'indexing'];
+  var STAGE_STATUS = { '解析': 'parsing', '清洗': 'cleaning', '分块': 'chunking', '向量化': 'embedding', '入库': 'indexing' };
+  var FILTER_LABEL = { all: '全部', processing: '处理中', completed: '已完成', failed: '失败' };
+
+  // ---------- 知识库上下文 ----------
+  var kbId = new URLSearchParams(location.search).get('kb');
+  var kb = kbId ? MockUtil.kb(kbId) : null;
+
+  SupieUI.initShell('kb');
+
+  var pageState = 'normal'; // normal | loading | error
+  var filter = 'all';
+  var page = 1;
+  var pageSize = 10;
+  var openMenu = null;
+
+  function closeMenu() { if (openMenu) { openMenu.remove(); openMenu = null; } }
+
+  // ---------- 知识库不存在：错误态 ----------
+  if (!kb) {
+    $('#crumb-kb').textContent = '未找到';
+    $('#page-title').textContent = '文档管理';
+    $('#page-sub').textContent = '';
+    $('#header-actions').innerHTML = '';
+    $('#page-body').innerHTML =
+      '<div class="error-state">' +
+      '<div class="t">未找到该知识库</div>' +
+      '<div class="d">链接可能已过期，或该知识库已被删除。</div>' +
+      '<a class="btn btn-outline" href="kb.html">返回知识库列表</a></div>';
+    return;
+  }
+
+  $('#crumb-kb').textContent = kb.name;
+  $('#page-title').textContent = kb.name;
+  $('#page-sub').textContent = kb.description || '';
+  $('#header-actions').innerHTML = '<button class="btn btn-primary" id="btn-upload">' + icoPlus + '上传文档</button>';
+  $('#btn-upload').addEventListener('click', openUpload);
+
+  // ---------- 处理管线（异步推进演示） ----------
+  var running = new Map(); // docId -> { timers: [] }
+
+  function cancelPipeline(id) {
+    var p = running.get(id);
+    if (p) { p.timers.forEach(clearTimeout); running.delete(id); }
+  }
+  function estimateChunks(doc) { return Math.max(4, Math.round(doc.sizeKB / 2.2) + Math.floor(Math.random() * 7)); }
+
+  function startPipeline(doc) {
+    cancelPipeline(doc.id);
+    if (doc.scan === undefined) doc.scan = /扫描/.test(doc.name);
+    doc.status = 'queued'; doc.stage = '排队中'; doc.failureReason = null;
+    var timers = [];
+    running.set(doc.id, { timers: timers });
+    var stages = MockUtil.stageSeq;
+    function delay() { return 1500 + Math.round(Math.random() * 1000); }
+    function stepTo(i) {
+      if (!running.has(doc.id)) return;
+      if (i >= stages.length) {
+        running.delete(doc.id);
+        doc.status = 'completed'; doc.stage = null; doc.failureReason = null;
+        if (!doc.chunkCount) doc.chunkCount = estimateChunks(doc);
+        renderBody();
+        SupieUI.toast('文档已完成入库：' + doc.name, 'success');
+        return;
+      }
+      var stage = stages[i];
+      if (stage === '解析' && doc.scan) {
+        running.delete(doc.id);
+        doc.status = 'failed'; doc.stage = '解析';
+        doc.failureReason = '扫描件 PDF 暂不支持：未检测到文本层，请使用文本型 PDF';
+        renderBody();
+        return;
+      }
+      doc.status = STAGE_STATUS[stage]; doc.stage = stage;
+      renderBody();
+      timers.push(setTimeout(function () { stepTo(i + 1); }, delay()));
+    }
+    timers.push(setTimeout(function () { stepTo(0); }, delay()));
+  }
+
+  function retryDoc(doc) {
+    doc.retries = (doc.retries || 0) + 1;
+    startPipeline(doc);
+    renderBody();
+    SupieUI.toast('已重新提交处理任务', 'success');
+  }
+
+  function completeAll() {
+    var n = 0;
+    MockUtil.docs(kb.id).forEach(function (d) {
+      if (d.status === 'completed' || d.status === 'failed') return;
+      cancelPipeline(d.id);
+      d.status = 'completed'; d.stage = null; d.failureReason = null;
+      if (!d.chunkCount) d.chunkCount = estimateChunks(d);
+      n++;
+    });
+    renderBody();
+    if (n) SupieUI.toast('已将 ' + n + ' 个处理中任务置为已完成', 'success');
+  }
+
+  // ---------- 渲染 ----------
+  function matchFilter(d) {
+    if (filter === 'all') return true;
+    if (filter === 'completed') return d.status === 'completed';
+    if (filter === 'failed') return d.status === 'failed';
+    return PROCESSING_STATUSES.indexOf(d.status) >= 0;
+  }
+
+  function rowHTML(d) {
+    var meta = MockUtil.statusMeta(d.status);
+    var fmtLabel = { md: 'Markdown', txt: 'TXT', pdf: 'PDF' }[d.format] || d.format;
+    var chunksCell = d.status === 'completed' ? d.chunkCount : '—';
+    var statusCell = '<span class="badge ' + meta.cls + '"><span class="dot"></span>' + meta.label + '</span>';
+    if (d.status === 'failed') {
+      statusCell += '<div class="fail-reason">' + icoAlert + '<span>' + (d.failureReason ? esc(d.failureReason) : '处理失败，原因未知') + '</span></div>';
+    }
+    return '<tr>' +
+      '<td><div class="cell-flex">' + SupieUI.docIcon(d.format) +
+        '<div class="truncate"><div class="cell-main"><a href="doc-detail.html?doc=' + encodeURIComponent(d.id) + '">' + esc(d.name) + '</a></div></div></div></td>' +
+      '<td>' + fmtLabel + '</td>' +
+      '<td>' + statusCell + '</td>' +
+      '<td class="num">' + chunksCell + '</td>' +
+      '<td class="num">' + fmtSize(d.sizeKB) + '</td>' +
+      '<td class="muted">' + esc(d.uploadedAt) + '</td>' +
+      '<td><div class="row-actions" style="position:relative">' +
+        '<a class="btn btn-ghost btn-sm" href="doc-detail.html?doc=' + encodeURIComponent(d.id) + '">详情</a>' +
+        '<button class="icon-btn" data-more data-id="' + esc(d.id) + '" aria-label="更多操作" aria-haspopup="menu">⋯</button>' +
+      '</div></td></tr>';
+  }
+
+  function skeletonHTML() {
+    var rows = '';
+    for (var i = 0; i < 6; i++) {
+      rows += '<div class="skeleton-row">' +
+        '<div class="skeleton" style="width:32px;height:32px;border-radius:6px"></div>' +
+        '<div class="skeleton skeleton-line grow" style="max-width:240px"></div>' +
+        '<div class="skeleton skeleton-line" style="width:64px"></div>' +
+        '<div class="skeleton skeleton-line" style="width:72px"></div>' +
+        '<div class="skeleton skeleton-line" style="width:120px"></div></div>';
+    }
+    return '<div class="table-wrap fill">' + rows + '</div>';
+  }
+
+  function errorHTML() {
+    return '<div class="error-state">' +
+      '<div class="t">服务暂不可用</div>' +
+      '<div class="d">文档列表加载失败，请稍后重试。</div>' +
+      '<button class="btn btn-outline" id="btn-state-retry">重试</button></div>';
+  }
+
+  function emptyHTML() {
+    return '<div class="empty-state">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="M9 15l3 3 3-3"/></svg>' +
+      '<div class="t">该知识库还没有文档</div>' +
+      '<div class="d">上传 Markdown、TXT 或文本型 PDF 后，系统将自动完成解析、分块、向量化与入库。</div>' +
+      '<button class="btn btn-primary" id="btn-empty-upload">上传文档</button></div>';
+  }
+
+  function filteredEmptyHTML() {
+    return '<div class="empty-state">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M8 11h6"/></svg>' +
+      '<div class="t">没有符合当前筛选的文档</div>' +
+      '<div class="d">当前筛选：' + FILTER_LABEL[filter] + '。可清除筛选查看全部文档。</div>' +
+      '<button class="btn btn-outline" id="btn-clear-filter">清除筛选</button></div>';
+  }
+
+  function renderBody() {
+    openMenu = null;
+    var body = $('#page-body');
+    if (pageState === 'error') {
+      body.innerHTML = errorHTML();
+      $('#btn-state-retry').addEventListener('click', function () { pageState = 'normal'; renderBody(); });
+      return;
+    }
+    if (pageState === 'loading') { body.innerHTML = skeletonHTML(); return; }
+
+    var all = MockUtil.docs(kb.id);
+    var list = all.filter(matchFilter);
+    var total = list.length;
+    var totalPages = Math.max(1, Math.ceil(total / pageSize));
+    if (page > totalPages) page = totalPages;
+
+    var html =
+      '<div class="toolbar">' +
+        '<div class="seg-filter" role="group" aria-label="状态筛选">' +
+          Object.keys(FILTER_LABEL).map(function (f) {
+            return '<button data-f="' + f + '" class="' + (filter === f ? 'on' : '') + '">' + FILTER_LABEL[f] + '</button>';
+          }).join('') +
+        '</div>' +
+      '</div>';
+
+    if (total === 0) {
+      html += all.length === 0 ? emptyHTML() : filteredEmptyHTML();
+    } else {
+      var pageList = list.slice((page - 1) * pageSize, page * pageSize);
+      html +=
+        '<div class="table-wrap fill"><table class="table">' +
+        '<thead><tr><th>文档</th><th>格式</th><th>状态</th><th class="num">分块数</th><th class="num">大小</th><th>上传时间</th><th style="text-align:right">操作</th></tr></thead>' +
+        '<tbody>' + pageList.map(rowHTML).join('') + '</tbody></table></div>' +
+        '<div class="pagination" id="pagination"></div>';
+    }
+    body.innerHTML = html;
+
+    body.querySelectorAll('[data-f]').forEach(function (b) {
+      b.addEventListener('click', function () { filter = b.dataset.f; page = 1; renderBody(); });
+    });
+    var clr = body.querySelector('#btn-clear-filter');
+    if (clr) clr.addEventListener('click', function () { filter = 'all'; page = 1; renderBody(); });
+    var up = body.querySelector('#btn-empty-upload');
+    if (up) up.addEventListener('click', openUpload);
+    var pg = body.querySelector('#pagination');
+    if (pg) {
+      SupieUI.renderPagination(pg, {
+        total: total, page: page, pageSize: pageSize,
+        onPage: function (p) { page = p; renderBody(); },
+        onPageSize: function (s) { pageSize = s; page = 1; renderBody(); },
+      });
+    }
+  }
+
+  // ---------- 行内 More 菜单（重试 / 删除） ----------
+  function toggleMenu(btn) {
+    closeMenu();
+    var id = btn.dataset.id;
+    var doc = MockUtil.docs(kb.id).find(function (x) { return x.id === id; });
+    if (!doc) return;
+    var menu = document.createElement('div');
+    menu.className = 'row-menu';
+    menu.setAttribute('role', 'menu');
+    menu.innerHTML =
+      (doc.status === 'failed' ? '<button role="menuitem" data-act="retry" data-id="' + esc(id) + '">重试</button>' : '') +
+      '<button role="menuitem" class="danger" data-act="delete" data-id="' + esc(id) + '">删除</button>';
+    btn.parentElement.appendChild(menu);
+    openMenu = menu;
+  }
+
+  $('#page-body').addEventListener('click', function (e) {
+    var moreBtn = e.target.closest('[data-more]');
+    if (moreBtn) { toggleMenu(moreBtn); return; }
+    var act = e.target.closest('[data-act]');
+    if (act) {
+      var doc = MockUtil.docs(kb.id).find(function (x) { return x.id === act.dataset.id; });
+      closeMenu();
+      if (!doc) return;
+      if (act.dataset.act === 'retry') retryDoc(doc);
+      else if (act.dataset.act === 'delete') openDeleteDoc(doc);
+      return;
+    }
+    if (openMenu && !e.target.closest('.row-menu')) closeMenu();
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenu(); });
+
+  // ---------- 删除文档 ----------
+  function openDeleteDoc(doc) {
+    var n = doc.chunkCount || 0;
+    var impact;
+    if (doc.status === 'completed' && n > 0) {
+      impact = '<p>将删除文档 <b>' + esc(doc.name) + '</b>，影响范围：</p>' +
+        '<ul class="impact-list">' +
+        '<li>其 ' + n + ' 个分块与向量数据将退出检索；</li>' +
+        '<li>相关问答会话中对该文档的引用将失效。</li>' +
+        '</ul>' +
+        '<p class="kb-del-note">该操作不可恢复。</p>';
+    } else {
+      impact = '<p>将删除文档 <b>' + esc(doc.name) + '</b>。' +
+        (doc.status === 'completed' ? '' : '该文档尚未完成入库，') + '删除后不可恢复。</p>';
+    }
+    SupieUI.confirmDanger({
+      title: '删除文档',
+      html: impact,
+      confirmText: '删除',
+      onConfirm: function () {
+        cancelPipeline(doc.id);
+        var arr = MockUtil.docs(kb.id);
+        var i = arr.indexOf(doc);
+        if (i >= 0) arr.splice(i, 1);
+        var totalPages = Math.max(1, Math.ceil(arr.filter(matchFilter).length / pageSize));
+        if (page > totalPages) page = totalPages;
+        renderBody();
+        SupieUI.toast('文档已删除', 'success');
+      },
+    });
+  }
+
+  // ---------- 上传文档（Modal：文件选择 + 分块策略） ----------
+  var DUP_HASH = 'sha256:9f21c3…a8b2'; // 与 doc-101 相同，用于演示内容哈希去重
+  function buildPresets() {
+    var hasDup = MockUtil.docs(kb.id).some(function (d) { return d.hash === DUP_HASH; });
+    return [
+      { name: '支付网关服务架构说明.md', format: 'md', sizeKB: 86, hash: DUP_HASH,
+        label: '支付网关服务架构说明.md（Markdown · 86 KB' + (hasDup ? ' · 与库内已有文件内容相同' : '') + '）' },
+      { name: '服务网格流量治理方案.md', format: 'md', sizeKB: 42,
+        label: '服务网格流量治理方案.md（Markdown · 42 KB）' },
+      { name: '网关告警规则说明.txt', format: 'txt', sizeKB: 12,
+        label: '网关告警规则说明.txt（TXT · 12 KB）' },
+      { name: '订单服务接口文档-v3.pdf', format: 'pdf', sizeKB: 1580, pages: 18,
+        label: '订单服务接口文档-v3.pdf（文本型 PDF · 1.5 MB）' },
+      { name: '部署手册-扫描版.pdf', format: 'pdf', sizeKB: 4200, pages: 22, scan: true,
+        label: '部署手册-扫描版.pdf（扫描件 PDF · 4.1 MB）' },
+    ];
+  }
+
+  function openUpload() {
+    var presets = buildPresets();
+    var m = SupieUI.openModal({
+      title: '上传文档',
+      bodyHTML:
+        '<div class="field">' +
+          '<label class="label" for="up-file">选择文件 <span class="req">*</span></label>' +
+          '<select class="select" id="up-file"><option value="">请选择要上传的文件</option>' +
+          presets.map(function (p, i) { return '<option value="' + i + '">' + esc(p.label) + '</option>'; }).join('') +
+          '</select>' +
+          '<div class="field-error" id="up-file-err" style="display:none"></div>' +
+        '</div>' +
+        '<div class="field">' +
+          '<label class="label">分块策略</label>' +
+          '<div class="radio-row">' +
+            '<label class="radio-opt on"><input type="radio" name="up-strategy" value="length-overlap" checked>' +
+              '<span><span class="t">按长度切分 + 重叠</span>' +
+              '<span class="d">按固定字符数切分，相邻分块保留 80 字符重叠，适合无明确标题结构的文本。</span></span></label>' +
+            '<label class="radio-opt"><input type="radio" name="up-strategy" value="structure">' +
+              '<span><span class="t">按标题结构切分 + 最大长度</span>' +
+              '<span class="d">优先按标题与段落边界切分，单块不超过 512 字符，保留标题路径便于引用追溯。</span></span></label>' +
+          '</div>' +
+        '</div>' +
+        '<div id="up-alert"></div>',
+      footerHTML: '<button class="btn btn-outline" data-cancel>取消</button>' +
+                  '<button class="btn btn-primary" data-ok style="min-width:104px">开始上传</button>',
+    });
+    var sel = m.overlay.querySelector('#up-file');
+    var errEl = m.overlay.querySelector('#up-file-err');
+    var alertBox = m.overlay.querySelector('#up-alert');
+    var okBtn = m.overlay.querySelector('[data-ok]');
+    m.overlay.querySelector('[data-cancel]').addEventListener('click', m.close);
+
+    m.overlay.querySelectorAll('input[name="up-strategy"]').forEach(function (r) {
+      r.addEventListener('change', function () {
+        m.overlay.querySelectorAll('.radio-opt').forEach(function (o) { o.classList.remove('on'); });
+        r.closest('.radio-opt').classList.add('on');
+      });
+    });
+    sel.addEventListener('change', function () { errEl.style.display = 'none'; sel.classList.remove('invalid'); });
+
+    okBtn.addEventListener('click', function () {
+      if (sel.value === '') {
+        errEl.textContent = '请选择要上传的文件';
+        errEl.style.display = 'block';
+        sel.classList.add('invalid');
+        sel.focus();
+        return;
+      }
+      var preset = presets[parseInt(sel.value, 10)];
+      var strategy = m.overlay.querySelector('input[name="up-strategy"]:checked').value;
+      okBtn.disabled = true;
+      okBtn.innerHTML = '<span class="spinner"></span> 上传中…';
+      setTimeout(function () {
+        okBtn.disabled = false;
+        okBtn.innerHTML = '开始上传';
+        // a) 内容哈希去重
+        var dupDoc = preset.hash ? MockUtil.docs(kb.id).find(function (d) { return d.hash === preset.hash; }) : null;
+        if (dupDoc) {
+          alertBox.innerHTML = '<div class="alert alert-warning">' + icoAlert +
+            '<div><b>未重复入库：</b>知识库内已存在相同文件（内容哈希一致）。已有文档：' + esc(dupDoc.name) + '（上传于 ' + esc(dupDoc.uploadedAt) + '）。</div></div>';
+          return;
+        }
+        // b) 扫描件 PDF
+        if (preset.scan) {
+          alertBox.innerHTML = '<div class="alert alert-error">' + icoAlert +
+            '<div><b>扫描件 PDF 暂不支持：</b>该文件未检测到文本层。请上传文本型 PDF，或先完成 OCR 后再上传。</div></div>';
+          return;
+        }
+        // c) 正常入库
+        m.close();
+        var doc = {
+          id: MockUtil.uid('doc'), name: preset.name, format: preset.format, sizeKB: preset.sizeKB,
+          status: 'queued', stage: '排队中', failureReason: null, chunkCount: 0, pages: preset.pages || null,
+          hash: preset.hash || genHash(), chunkStrategy: strategy, uploadedAt: nowStr(), retries: 0,
+        };
+        MockUtil.docs(kb.id).unshift(doc);
+        startPipeline(doc);
+        renderBody();
+        SupieUI.toast('上传成功，任务已受理', 'success');
+      }, 700);
+    });
+  }
+
+  // ---------- 注入批量文档（演示多页与页码跳转） ----------
+  function injectBatch() {
+    var docs = MockUtil.docs(kb.id);
+    var start = docs.length;
+    var target = 76;
+    if (start >= target) { SupieUI.toast('当前已有 ' + start + ' 条文档，无需注入'); return; }
+    var topics = ['容器平台使用规范', '日志采集接入指南', 'MySQL 慢查询治理', '服务发布检查清单', '线上告警响应流程',
+      '数据备份与恢复方案', 'Redis 缓存设计规范', '接口幂等实现指南', '灰度发布操作手册', '监控大盘配置说明',
+      '故障演练操作记录', '配置中心接入说明', '消息队列选型评估', '网关鉴权配置手册', '数据库变更流程',
+      '容量规划方法', 'SLA 与值班制度', '代码评审规范', '测试环境使用说明', '安全扫描处理流程'];
+    var kinds = [{ f: 'md', ext: '.md' }, { f: 'txt', ext: '.txt' }, { f: 'pdf', ext: '.pdf' }];
+    var fails = ['Embedding 服务连接超时（已重试 3 次）', '文件编码异常：检测到混合 GBK/UTF-8 编码，清洗失败', '解析超时：文件超过 200 页，请拆分后上传'];
+    var used = {};
+    docs.forEach(function (d) { used[d.name] = true; });
+    var base = new Date('2026-09-13T12:00:00');
+    for (var i = start; i < target; i++) {
+      var kind = kinds[i % 3];
+      var name = topics[i % topics.length] + kind.ext;
+      var v = 2;
+      while (used[name]) { name = topics[i % topics.length] + '-v' + (v++) + kind.ext; }
+      used[name] = true;
+      var sizeKB = 12 + Math.floor(Math.random() * 2600);
+      var failed = i % 9 === 4;
+      var d0 = new Date(base.getTime() - i * 8 * 3600 * 1000);
+      docs.push({
+        id: MockUtil.uid('doc'), name: name, format: kind.f, sizeKB: sizeKB,
+        status: failed ? 'failed' : 'completed',
+        stage: failed ? '向量化' : null,
+        failureReason: failed ? fails[i % fails.length] : null,
+        chunkCount: failed ? 0 : Math.max(4, Math.round(sizeKB / 2.2)),
+        pages: kind.f === 'pdf' ? 5 + Math.floor(Math.random() * 40) : null,
+        hash: genHash(), chunkStrategy: Math.random() < 0.5 ? 'structure' : 'length-overlap',
+        uploadedAt: fmtDate(d0), retries: failed ? 1 : 0,
+      });
+    }
+    renderBody();
+    SupieUI.toast('已注入 ' + (target - start) + ' 条文档，共 ' + docs.length + ' 条', 'success');
+  }
+
+  // ---------- 预览工具区（非业务界面） ----------
+  SupieUI.initProtoTools([
+    {
+      label: '页面状态',
+      control: {
+        type: 'select',
+        options: ['正常', '加载中', '服务不可用'],
+        value: '正常',
+        onChange: function (v) {
+          pageState = v === '正常' ? 'normal' : (v === '加载中' ? 'loading' : 'error');
+          renderBody();
+        },
+      },
+    },
+    { label: '处理推进', control: { type: 'button', text: '立即完成全部处理中任务', onClick: completeAll } },
+    { label: '分页演示', control: { type: 'button', text: '注入批量文档（至 20+ 条）', onClick: injectBatch } },
+  ]);
+
+  renderBody();
+})();
+</script>
+</body>
+</html>

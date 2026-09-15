@@ -1,0 +1,5 @@
+interface:
+  display_name: "Supie Dev"
+  short_description: "0→1 requirements, architecture, implementation, verification"
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.13</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.rag</groupId>
+  <artifactId>rag-server</artifactId>
+  <version>0.1.0</version>
+  <name>rag-server</name>
+  <description>通用知识问答 RAG 服务（docs/03-技术路线.md）</description>
+
+  <properties>
+    <java.version>17</java.version>
+    <maven.compiler.release>17</maven.compiler.release>
+
+    <!-- 与服务端同代（docker-compose 使用 elasticsearch:8.14.1） -->
+    <elasticsearch-java.version>8.14.3</elasticsearch-java.version>
+    <!-- LangChain4j 1.x：BOM 统一管理 open-ai(1.0.1) 与 pdfbox parser(1.0.1-beta6)。
+         选 1.0.1 而非更高 1.x：1.20.0 POM 显式声明 jackson 2.22，与本 Boot 3.3.13
+         dependencyManagement 锁定的 jackson 2.17 冲突风险大；1.0.x 为首个稳定线，
+         open-ai 模块使用 JDK HttpClient，无 okhttp 传递冲突。 -->
+    <langchain4j.version>1.0.1</langchain4j.version>
+    <minio.version>8.5.17</minio.version>
+    <springdoc.version>2.6.0</springdoc.version>
+    <!-- T7 契约漂移检查用 -->
+    <openapi-diff.version>2.1.7</openapi-diff.version>
+    <!-- Boot 3.3.13 的 dependencyManagement 不管理 parsson（JSON-P 实现），需显式钉版本；
+         1.1.x 与 Boot 托管的 jakarta.json-api 2.1.x 兼容 -->
+    <parsson.version>1.1.7</parsson.version>
+    <!-- 覆盖 Boot BOM 的 1.19.8：Docker Engine 29.x 的 API 协商与旧 docker-java 不兼容（/version 400），1.21.4+ 修复 -->
+    <testcontainers.version>1.21.4</testcontainers.version>
+  </properties>
+
+  <!-- LangChain4j BOM：统一管理 open-ai(1.0.1) 与 pdfbox parser(1.0.1-beta6) 版本。
+       放在 Boot dependencyManagement（继承的 parent）之后 import，Boot 自身的
+       jackson/okhttp 管理仍优先于 langchain4j 的传递声明。 -->
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>dev.langchain4j</groupId>
+        <artifactId>langchain4j-bom</artifactId>
+        <version>${langchain4j.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <!-- == Spring Boot == -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-jpa</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+
+    <!-- == 持久化：MySQL + Flyway == -->
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-mysql</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <!-- == Elasticsearch 官方 java client ==
+         elasticsearch-java 需要 jakarta.json-api（版本由 Boot 托管）；
+         运行时还需一个 JSON-P 实现（parsson，Boot 3.3 不管理版本，已显式钉版）。 -->
+    <dependency>
+      <groupId>co.elastic.clients</groupId>
+      <artifactId>elasticsearch-java</artifactId>
+      <version>${elasticsearch-java.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>jakarta.json</groupId>
+      <artifactId>jakarta.json-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.eclipse.parsson</groupId>
+      <artifactId>parsson</artifactId>
+      <version>${parsson.version}</version>
+    </dependency>
+
+    <!-- == 模型接入：LangChain4j（OpenAI 兼容，版本由上方 BOM 管理） == -->
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-open-ai</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-document-parser-apache-pdfbox</artifactId>
+    </dependency>
+
+    <!-- == Office 文档解析（R3-P1：docx/xlsx）。Apache POI 5.x 兼容 Java 17；
+         poi-ooxml 传递 poi/core/schemas/xmlbeans，仅服务端解析用。 -->
+    <dependency>
+      <groupId>org.apache.poi</groupId>
+      <artifactId>poi-ooxml</artifactId>
+      <version>5.3.0</version>
+    </dependency>
+
+    <!-- == 对象存储 == -->
+    <dependency>
+      <groupId>io.minio</groupId>
+      <artifactId>minio</artifactId>
+      <version>${minio.version}</version>
+    </dependency>
+
+    <!-- == API 文档（springdoc，供 T7 漂移检查导出 /v3/api-docs） == -->
+    <dependency>
+      <groupId>org.springdoc</groupId>
+      <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+      <version>${springdoc.version}</version>
+    </dependency>
+
+    <!-- == 测试 == -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>mysql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>elasticsearch</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- mockwebserver：模型服务替身（版本由 Boot 托管的 okhttp3 BOM 管理） -->
+    <dependency>
+      <groupId>com.squareup.okhttp3</groupId>
+      <artifactId>mockwebserver</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- okhttp-sse：SSE 真实流测试客户端 -->
+    <dependency>
+      <groupId>com.squareup.okhttp3</groupId>
+      <artifactId>okhttp-sse</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- openapi-diff：T7 契约漂移测试（与 ../contracts/openapi.yaml 比对） -->
+    <dependency>
+      <groupId>org.openapitools.openapidiff</groupId>
+      <artifactId>openapi-diff-core</artifactId>
+      <version>${openapi-diff.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+      <!-- surefire 显式包含 *IT：Boot parent 默认 include 只覆盖 *Test（JUnit5），IT 类会被静默跳过 -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <includes>
+            <include>**/*Test.java</include>
+            <include>**/*IT.java</include>
+          </includes>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

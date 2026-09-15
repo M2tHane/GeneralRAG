@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>效果评测 · 通用知识问答 RAG 原型</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  /* ---------- 页面私有样式（效果评测 · 运行列表） ---------- */
+  .content-inner.page-fill { height: 100%; min-height: 0; }
+  #page-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .table-wrap.fill { flex: 1; min-height: 200px; overflow: auto; }
+  #pagination { padding: 12px 2px 28px; margin-top: 0; }
+
+  #runs-table { table-layout: fixed; min-width: 1140px; }
+  #runs-table td.num, #runs-table th.num { padding-left: 4px; padding-right: 6px; }
+  #runs-table th.col-check, #runs-table td.col-check { padding-left: 16px; padding-right: 0; width: 40px; }
+  /* 固定文本列宽度：table-layout:fixed 下宽度才生效，避免自动布局把「运行时间」压成每行一个词 */
+  #runs-table th.col-time, #runs-table td.col-time { width: 136px; }
+  #runs-table .col-time .cell-main { white-space: nowrap; }
+  #runs-table th.col-ds, #runs-table td.col-ds { width: 104px; }
+  #runs-table th.col-mode, #runs-table td.col-mode { width: 76px; white-space: nowrap; }
+  #runs-table th.col-status, #runs-table td.col-status { width: 208px; }
+  #runs-table th.col-actions, #runs-table td.col-actions { width: 96px; white-space: nowrap; }
+  .row-check { width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer; vertical-align: middle; }
+  .runs-row { cursor: pointer; }
+  .runs-row.row-selected { background: var(--primary-subtle); }
+  .runs-row.row-selected:hover { background: var(--primary-subtle); }
+  .metric-cell { color: var(--foreground); }
+  .metric-none { color: var(--muted-foreground); }
+  .fail-reason {
+    margin-top: 6px; font-size: 14px; line-height: 20px; font-weight: 500;
+    color: var(--destructive); display: flex; align-items: flex-start; gap: 4px; max-width: 100%;
+  }
+  .fail-reason > span { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+  .fail-reason svg { width: 15px; height: 15px; flex: none; margin-top: 3px; }
+  .progress-line { font-size: 13px; color: var(--muted-foreground); margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+  .filter-group { display: flex; align-items: center; gap: 6px; }
+  .filter-group .select { width: 168px; }
+  .sel-hint { font-size: 13px; line-height: 18px; margin-top: 8px; color: var(--muted-foreground); }
+  .sel-hint.warn { color: var(--warning); }
+  .sel-hint.bad { color: var(--destructive); }
+  .sel-hint.ok { color: var(--success); }
+
+  .skeleton-toolbar { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+  .degraded-mark { color: var(--warning); font-weight: 500; }
+
+  @media (max-width: 720px) {
+    .filter-group { flex: 1 1 100%; }
+    .filter-group .select { width: 100%; }
+    #btn-new { width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="sidebar-scrim" id="sidebar-scrim"></div>
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" id="menu-btn" aria-label="打开导航">☰</button>
+      <div class="crumb"><b>效果评测</b></div>
+    </header>
+    <main class="content">
+      <div class="content-inner page-fill">
+        <div class="page-header">
+          <div>
+            <h1>效果评测</h1>
+          </div>
+        </div>
+
+        <div id="toolbar">
+          <div class="toolbar">
+            <div class="filter-group">
+              <label class="label" for="f-ds">数据集</label>
+              <select class="select" id="f-ds"></select>
+            </div>
+            <div class="filter-group">
+              <label class="label" for="f-kb">知识库</label>
+              <select class="select" id="f-kb"></select>
+            </div>
+            <button class="btn btn-outline" id="btn-compare" disabled>对比选中运行</button>
+            <div class="spacer"></div>
+            <button class="btn btn-primary" id="btn-new">发起评测运行</button>
+          </div>
+          <div class="sel-hint" id="sel-hint"></div>
+        </div>
+
+        <div id="page-body"></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="ui.js"></script>
+<script src="data.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  const $ = (s, el) => (el || document).querySelector(s);
+
+  /* ---------- 通用工具 ---------- */
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function fmtDT(d) {
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  const SVG_RUNS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3h8v4l4.5 9.2A3 3 0 0 1 17.8 21H6.2a3 3 0 0 1-2.7-4.8L8 7Z"/><path d="M7 3h10"/></svg>';
+  const SVG_FILTER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v6l-4 2v-8Z"/></svg>';
+  const SVG_ALERT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
+  const SVG_SERVER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01"/><path d="M6 18h.01"/></svg>';
+
+  /* ---------- 指标列（顺序即表头顺序；标签与释义来自 runMetricMeta） ---------- */
+  const METRIC_COLUMNS = ['hitAt1', 'hitAt3', 'hitAt5', 'recallAt5', 'mrr', 'refusalAccuracy', 'p95Ms'];
+
+  /* ---------- 页面状态 ---------- */
+  const state = {
+    datasetId: 'all',
+    kbId: 'all',
+    selected: new Set(),
+    page: 1,
+    pageSize: 10,
+    pageState: 'normal', // normal | loading | error
+  };
+
+  // 初始数据快照：用于「重置演示数据」移除注入与新建的运行
+  const INITIAL_RUN_IDS = MockData.evalRuns.map((r) => r.id);
+  const INITIAL_ITEM_IDS = Object.keys(MockData.evalRunItems);
+  const progressTimers = new Map();
+
+  /* =========================================================
+     筛选与查询
+     ========================================================= */
+  function filteredRuns() {
+    return MockData.evalRuns
+      .filter((r) => state.datasetId === 'all' || r.datasetId === state.datasetId)
+      .filter((r) => state.kbId === 'all' || r.kbId === state.kbId)
+      .slice()
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+  }
+
+  function runById(id) { return MockUtil.run(id); }
+
+  /* =========================================================
+     渲染：工具栏
+     ========================================================= */
+  function renderToolbar() {
+    const ds = $('#f-ds');
+    const kb = $('#f-kb');
+    if (!ds.options.length) {
+      ds.innerHTML = '<option value="all">全部数据集</option>' +
+        MockData.evalDatasets.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('');
+      kb.innerHTML = '<option value="all">全部知识库</option>' +
+        MockData.knowledgeBases.map((k) => `<option value="${esc(k.id)}">${esc(k.name)}</option>`).join('');
+    }
+    ds.value = state.datasetId;
+    kb.value = state.kbId;
+  }
+
+  function updateSelectionUI() {
+    const n = state.selected.size;
+    const btn = $('#btn-compare');
+    const hint = $('#sel-hint');
+    btn.disabled = n !== 2;
+    hint.className = 'sel-hint';
+    if (n === 0) {
+      hint.textContent = '勾选表格中 2 次运行后，可对比同一数据集上的指标变化。';
+    } else if (n === 1) {
+      hint.textContent = '已选 1 次运行，请再选 1 次运行进行对比。';
+      hint.classList.add('warn');
+    } else if (n === 2) {
+      const names = Array.from(state.selected).map((id) => {
+        const r = runById(id);
+        return r ? r.title : id;
+      });
+      hint.textContent = '已选 2 次运行：' + names.join(' vs ') + '。';
+      hint.classList.add('ok');
+    } else {
+      hint.textContent = '已选 ' + n + ' 次运行，对比仅支持 2 次，请取消多余的选择。';
+      hint.classList.add('bad');
+    }
+    document.querySelectorAll('#runs-table .runs-row').forEach((tr) => {
+      tr.classList.toggle('row-selected', state.selected.has(tr.dataset.id));
+    });
+    const all = document.querySelectorAll('#runs-table .row-check');
+    const head = $('#check-all');
+    if (head) {
+      const checked = Array.from(all).filter((c) => c.checked).length;
+      head.checked = all.length > 0 && checked === all.length;
+      head.indeterminate = checked > 0 && checked < all.length;
+    }
+  }
+
+  /* =========================================================
+     渲染：表格
+     ========================================================= */
+  function metricCell(run, key) {
+    const meta = MockData.runMetricMeta[key];
+    const v = run.metrics ? run.metrics[key] : null;
+    const text = MockUtil.fmtMetric(key, v);
+    return `<td class="num ${v == null ? 'metric-none' : 'metric-cell'}" title="${esc(meta ? meta.desc : key)}">${esc(text)}</td>`;
+  }
+
+  function statusCell(run) {
+    const meta = MockUtil.runStatusMeta(run.status);
+    let html = `<span class="badge ${meta.cls} ${meta.spin ? 'running' : ''}"><span class="dot"></span>${esc(meta.label)}</span>`;
+    if (run.status === 'RUNNING') {
+      html += `<div class="progress-line" data-progress="${esc(run.id)}">已处理 ${run.processedCount}/${run.itemCount} 题</div>`;
+    }
+    if (run.status === 'FAILED') {
+      html += `<div class="fail-reason">${SVG_ALERT}<span>${esc(run.failureReason || '运行失败，原因未知')}</span></div>`;
+    }
+    return `<td class="col-status">${html}</td>`;
+  }
+
+  function rowHTML(run) {
+    const version = MockUtil.datasetVersion(run.datasetId, run.datasetVersionNo);
+    const anchor = version ? version.anchorModeCompact : '—';
+    const modeShort = MockUtil.modeShort(run.config.retrievalMode);
+    return `<tr class="runs-row" data-id="${esc(run.id)}">
+      <td class="col-check"><input type="checkbox" class="row-check" data-id="${esc(run.id)}" ${state.selected.has(run.id) ? 'checked' : ''} aria-label="选择运行 ${esc(run.title)}"></td>
+      <td class="col-time">
+        <div class="cell-main">${esc(run.createdAt)}</div>
+        <div class="cell-sub">${esc(run.title)}</div>
+      </td>
+      <td class="col-ds">
+        <div class="cell-main">${esc(run.datasetName)}</div>
+        <div class="cell-sub">v${run.datasetVersionNo} · ${esc(anchor)}</div>
+      </td>
+      <td class="col-mode" title="${esc(MockUtil.modeLabel(run.config.retrievalMode))}">${esc(modeShort)}</td>
+      ${METRIC_COLUMNS.map((k) => metricCell(run, k)).join('')}
+      ${statusCell(run)}
+      <td class="col-actions">
+        <div class="row-actions">
+          <button class="btn btn-ghost btn-sm" data-config="${esc(run.id)}">配置</button>
+          <a class="btn btn-ghost btn-sm" href="eval-run.html?run=${encodeURIComponent(run.id)}">详情</a>
+        </div>
+      </td>
+    </tr>`;
+  }
+
+  function tableHTML(list) {
+    const head = METRIC_COLUMNS.map((k) => {
+      const meta = MockData.runMetricMeta[k];
+      return `<th class="num" title="${esc(meta ? meta.desc : k)}">${esc(meta ? meta.label : k)}</th>`;
+    }).join('');
+    return `<table class="table" id="runs-table">
+      <thead><tr>
+        <th class="col-check"><input type="checkbox" class="row-check" id="check-all" aria-label="选择本页全部运行"></th>
+        <th class="col-time">运行时间</th>
+        <th class="col-ds">数据集</th>
+        <th class="col-mode">检索模式</th>
+        ${head}
+        <th class="col-status">状态</th>
+        <th class="col-actions" style="text-align:right">操作</th>
+      </tr></thead>
+      <tbody>${list.map(rowHTML).join('')}</tbody>
+    </table>`;
+  }
+
+  /* =========================================================
+     渲染：空态 / 筛选空态 / 骨架 / 错误
+     ========================================================= */
+  function emptyHTML() {
+    return `<div class="empty-state">${SVG_RUNS}
+      <div class="t">暂无评测运行</div>
+      <div class="d">选择数据集与知识库发起一次评测运行，运行完成后可查看逐题命中与指标。</div>
+      <button class="btn btn-primary" id="btn-empty-new">发起评测运行</button>
+    </div>`;
+  }
+
+  function filteredEmptyHTML() {
+    return `<div class="empty-state">${SVG_FILTER}
+      <div class="t">当前筛选条件下没有运行</div>
+      <div class="d">已按数据集与知识库筛选，没有符合条件的运行记录。</div>
+      <button class="btn btn-outline" id="btn-clear-filter">清除筛选</button>
+    </div>`;
+  }
+
+  function skeletonHTML() {
+    const row = '<div class="skeleton-row"><div class="skeleton skeleton-line" style="width:40px"></div><div class="skeleton skeleton-line" style="width:150px"></div><div class="skeleton skeleton-line" style="width:120px"></div><div class="skeleton skeleton-line grow"></div><div class="skeleton skeleton-line" style="width:90px"></div></div>';
+    return `<div class="skeleton-toolbar">
+        <div class="skeleton skeleton-line" style="width:220px; height:36px"></div>
+        <div class="skeleton skeleton-line" style="width:220px; height:36px"></div>
+        <div class="skeleton skeleton-line" style="width:140px; height:36px"></div>
+      </div>
+      <div class="table-wrap fill">${row}${row}${row}${row}${row}${row}${row}${row}</div>`;
+  }
+
+  function errorHTML() {
+    return `<div class="error-state">${SVG_SERVER}
+      <div class="t">评测运行列表加载失败</div>
+      <div class="d">无法获取运行记录，请重试。已选中的对比组合不会保留。</div>
+      <button class="btn btn-outline" id="btn-retry">重试</button>
+    </div>`;
+  }
+
+  /* =========================================================
+     渲染：主流程
+     ========================================================= */
+  function render() {
+    const loading = state.pageState === 'loading';
+    const error = state.pageState === 'error';
+    $('#toolbar').hidden = loading || error;
+
+    const body = $('#page-body');
+    if (loading) { body.innerHTML = skeletonHTML(); return; }
+    if (error) {
+      body.innerHTML = errorHTML();
+      $('#btn-retry').addEventListener('click', () => { state.pageState = 'normal'; render(); });
+      return;
+    }
+
+    const list = filteredRuns();
+    const total = list.length;
+    const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
+    if (state.page > totalPages) state.page = totalPages;
+    if (state.page < 1) state.page = 1;
+
+    if (total === 0) {
+      body.innerHTML = MockData.evalRuns.length === 0 ? emptyHTML() : filteredEmptyHTML();
+      const b1 = $('#btn-empty-new');
+      if (b1) b1.addEventListener('click', openNewRunModal);
+      const b2 = $('#btn-clear-filter');
+      if (b2) b2.addEventListener('click', () => {
+        state.datasetId = 'all';
+        state.kbId = 'all';
+        state.page = 1;
+        renderToolbar();
+        render();
+      });
+      updateSelectionUI();
+      return;
+    }
+
+    const pageList = list.slice((state.page - 1) * state.pageSize, state.page * state.pageSize);
+    body.innerHTML = `<div class="table-wrap fill">${tableHTML(pageList)}</div>
+      <div class="pagination" id="pagination"></div>`;
+
+    $('#check-all').addEventListener('change', (e) => {
+      pageList.forEach((r) => {
+        if (e.target.checked) state.selected.add(r.id);
+        else state.selected.delete(r.id);
+      });
+      document.querySelectorAll('#runs-table .row-check[data-id]').forEach((c) => { c.checked = state.selected.has(c.dataset.id); });
+      updateSelectionUI();
+    });
+    document.querySelectorAll('#runs-table .row-check[data-id]').forEach((c) => {
+      c.addEventListener('change', () => {
+        if (c.checked) state.selected.add(c.dataset.id);
+        else state.selected.delete(c.dataset.id);
+        updateSelectionUI();
+      });
+    });
+    document.querySelectorAll('#runs-table [data-config]').forEach((b) => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const r = runById(b.dataset.config);
+        if (r) openConfigModal(r);
+      });
+    });
+    $('#page-body tbody').addEventListener('click', (e) => {
+      if (e.target.closest('a, button, input, select, label')) return;
+      const tr = e.target.closest('tr[data-id]');
+      if (tr) location.href = 'eval-run.html?run=' + encodeURIComponent(tr.dataset.id);
+    });
+
+    SupieUI.renderPagination($('#pagination'), {
+      total,
+      page: state.page,
+      pageSize: state.pageSize,
+      onPage: (p) => { state.page = p; render(); },
+      onPageSize: (s) => { state.pageSize = s; state.page = 1; render(); },
+    });
+    updateSelectionUI();
+  }
+
+  /* =========================================================
+     配置快照 Modal（复用 .kv）
+     ========================================================= */
+  function cfgValues(cfg) {
+    const degraded = cfg.rerankDegraded === true;
+    return [
+      ['检索模式', esc(MockUtil.modeLabel(cfg.retrievalMode))],
+      ['向量通道 topK', cfg.vectorTopK == null ? '—' : String(cfg.vectorTopK)],
+      ['BM25 通道 topK', cfg.bm25TopK == null ? '未启用' : String(cfg.bm25TopK)],
+      ['RRF k', cfg.rrfK == null ? '未启用' : String(cfg.rrfK)],
+      ['是否重排', cfg.rerankEnabled ? '启用' : '未启用'],
+      ['重排模型', cfg.rerankModel ? esc(cfg.rerankModel) : '—'],
+      ['重排状态', degraded ? '<span class="degraded-mark">已降级、未重排</span>' : (cfg.rerankEnabled ? '正常' : '未启用')],
+      ['送入模型 topK', String(cfg.topK)],
+      ['minScore', cfg.minScore.toFixed(2)],
+      ['embedding 模型', esc(cfg.embeddingModel)],
+      ['向量维度', String(cfg.embeddingDimensions)],
+      ['分块策略', esc(cfg.chunkStrategy)],
+      ['语料分块数', String(cfg.chunkCount)],
+    ];
+  }
+
+  function openConfigModal(run) {
+    SupieUI.openModal({
+      title: '运行配置：' + run.title,
+      wide: true,
+      bodyHTML: '<dl class="kv">' +
+          cfgValues(run.config).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('') +
+        '</dl>' +
+        (run.runNote ? `<div class="hint mt-16">${esc(run.runNote)}</div>` : ''),
+      footerHTML: '<button class="btn btn-outline" data-close>关闭</button>' +
+        '<a class="btn btn-primary" href="eval-run.html?run=' + encodeURIComponent(run.id) + '">查看运行详情</a>',
+    });
+  }
+
+  /* =========================================================
+     发起评测运行（Modal：5 字段，真实写入内存）
+     ========================================================= */
+  function openNewRunModal() {
+    const dsOptions = MockData.evalDatasets.map((d) => {
+      return d.versions.map((v) => {
+        const key = d.id + '#' + v.versionNo;
+        return `<option value="${key}">${esc(d.name)} v${v.versionNo}（${esc(v.anchorModeCompact)} · ${v.itemCount} 题）</option>`;
+      }).join('');
+    }).join('');
+    const kbOptions = MockData.knowledgeBases.map((k) => {
+      const docs = MockUtil.docs(k.id).length;
+      return `<option value="${esc(k.id)}" ${docs === 0 ? 'disabled' : ''}>${esc(k.name)}${docs === 0 ? '（暂无文档）' : ''}</option>`;
+    }).join('');
+    const modeOptions = Object.keys(MockData.retrievalModes).map((m) => {
+      return `<option value="${m}">${esc(MockData.retrievalModes[m].label)}</option>`;
+    }).join('');
+
+    const m = SupieUI.openModal({
+      title: '发起评测运行',
+      wide: true,
+      bodyHTML:
+        '<div class="field">' +
+          '<label class="label" for="nf-ds">数据集与版本 <span class="req">*</span></label>' +
+          '<select class="select" id="nf-ds"><option value="">请选择数据集与版本</option>' + dsOptions + '</select>' +
+          '<div class="field-error" id="nf-ds-err" hidden></div>' +
+        '</div>' +
+        '<div class="field">' +
+          '<label class="label" for="nf-kb">知识库 <span class="req">*</span></label>' +
+          '<select class="select" id="nf-kb"><option value="">请选择知识库</option>' + kbOptions + '</select>' +
+          '<div class="field-error" id="nf-kb-err" hidden></div>' +
+        '</div>' +
+        '<div class="field">' +
+          '<label class="label" for="nf-mode">检索模式</label>' +
+          '<select class="select" id="nf-mode">' + modeOptions + '</select>' +
+        '</div>' +
+        '<div class="field">' +
+          '<label class="label" for="nf-topk">送入模型的 topK <span class="req">*</span></label>' +
+          '<input class="input" id="nf-topk" type="text" inputmode="numeric" value="5">' +
+          '<div class="field-error" id="nf-topk-err" hidden></div>' +
+        '</div>' +
+        '<div class="field">' +
+          '<label class="label" for="nf-minscore">minScore <span class="req">*</span></label>' +
+          '<input class="input" id="nf-minscore" type="text" inputmode="decimal" value="0.30">' +
+          '<div class="field-error" id="nf-minscore-err" hidden></div>' +
+          '<div class="hint">低于该阈值的候选会被过滤，不进入送入模型的上下文。</div>' +
+        '</div>' +
+        '<div class="hint">提交后在内存中新增一条「运行中」记录，指标在运行完成后产生；原型不调用真实后端检索。</div>',
+      footerHTML: '<button class="btn btn-outline" data-cancel>取消</button>' +
+        '<button class="btn btn-primary" data-ok style="min-width:110px">发起运行</button>',
+    });
+
+    const overlay = m.overlay;
+    const f = {
+      ds: overlay.querySelector('#nf-ds'),
+      kb: overlay.querySelector('#nf-kb'),
+      mode: overlay.querySelector('#nf-mode'),
+      topK: overlay.querySelector('#nf-topk'),
+      minScore: overlay.querySelector('#nf-minscore'),
+    };
+    const errs = {
+      ds: overlay.querySelector('#nf-ds-err'),
+      kb: overlay.querySelector('#nf-kb-err'),
+      topK: overlay.querySelector('#nf-topk-err'),
+      minScore: overlay.querySelector('#nf-minscore-err'),
+    };
+    function clearErrors() {
+      Object.keys(errs).forEach((k) => { errs[k].hidden = true; errs[k].textContent = ''; });
+      [f.ds, f.kb, f.topK, f.minScore].forEach((el) => el.classList.remove('invalid'));
+    }
+    function showError(key, msg) {
+      errs[key].textContent = msg;
+      errs[key].hidden = false;
+      f[key].classList.add('invalid');
+    }
+
+    overlay.querySelector('[data-cancel]').addEventListener('click', m.close);
+    overlay.querySelector('[data-ok]').addEventListener('click', () => {
+      clearErrors();
+      const v = { ds: f.ds.value, kb: f.kb.value, mode: f.mode.value, topK: f.topK.value.trim(), minScore: f.minScore.value.trim() };
+      let bad = 0;
+      if (!v.ds) { showError('ds', '请选择数据集与版本'); bad++; }
+      if (!v.kb) { showError('kb', '请选择知识库'); bad++; }
+      else if (MockUtil.docs(v.kb).length === 0) { showError('kb', '该知识库暂无文档，无法执行检索评测'); bad++; }
+      if (!/^\d+$/.test(v.topK) || parseInt(v.topK, 10) < 1) { showError('topK', 'topK 需为不小于 1 的整数，例如 5'); bad++; }
+      const ms = Number(v.minScore);
+      if (v.minScore === '' || Number.isNaN(ms) || ms < 0 || ms > 1) { showError('minScore', 'minScore 需为 0–1 之间的小数，例如 0.30'); bad++; }
+      if (bad) return;
+
+      createRun({
+        datasetKey: v.ds,
+        kbId: v.kb,
+        mode: v.mode,
+        topK: parseInt(v.topK, 10),
+        minScore: ms,
+      });
+      m.close();
+    });
+  }
+
+  function createRun(input) {
+    const [datasetId, versionNoStr] = input.datasetKey.split('#');
+    const versionNo = parseInt(versionNoStr, 10);
+    const ds = MockUtil.dataset(datasetId);
+    const version = MockUtil.datasetVersion(datasetId, versionNo);
+    const kb = MockUtil.kb(input.kbId);
+    const mode = input.mode;
+
+    const cfg = {
+      retrievalMode: mode,
+      vectorTopK: mode === 'VECTOR' ? 5 : 30,
+      bm25TopK: mode === 'VECTOR' ? null : 30,
+      rrfK: mode === 'VECTOR' ? null : 60,
+      rerankEnabled: mode === 'HYBRID_RERANK',
+      rerankModel: mode === 'HYBRID_RERANK' ? 'qwen3.7-text-rerank' : null,
+      rerankDegraded: false,
+      topK: input.topK,
+      minScore: input.minScore,
+      embeddingModel: 'bge-m3',
+      embeddingDimensions: 1024,
+      chunkStrategy: 'STRUCTURE/800',
+      chunkCount: MockData.evalCorpusFingerprint.chunkCount,
+      corpusFingerprint: MockData.evalCorpusFingerprint,
+    };
+
+    const id = 'run-new-' + Date.now().toString(36);
+    const run = {
+      id,
+      title: MockUtil.modeShort(mode) + '检索（原型新建）',
+      status: 'RUNNING',
+      datasetId,
+      datasetName: ds ? ds.name : datasetId,
+      datasetType: ds ? ds.datasetType : null,
+      datasetVersionNo: versionNo,
+      kbId: kb.id,
+      kbName: kb.name,
+      itemCount: version ? version.itemCount : 0,
+      processedCount: 0,
+      createdAt: fmtDT(new Date()),
+      finishedAt: null,
+      failureReason: null,
+      config: cfg,
+      metrics: null,
+      runNote: '原型演示：本次运行由「发起评测运行」在内存中创建，状态与进度为模拟推进，指标需运行完成后由后端计算。',
+    };
+
+    MockData.evalRuns.push(run);
+    MockData.evalRunItems[id] = [];
+    state.datasetId = 'all';
+    state.kbId = 'all';
+    state.page = 1;
+    renderToolbar();
+    render();
+    SupieUI.toast('评测运行已创建：状态为运行中，指标待运行完成', 'success');
+    advanceProgress(run);
+  }
+
+  // 模拟推进：处理进度递增但不完成，指标保持为空（不伪造指标）
+  function advanceProgress(run) {
+    const timer = setInterval(() => {
+      if (!MockUtil.run(run.id)) { clearInterval(timer); progressTimers.delete(run.id); return; }
+      if (run.processedCount >= run.itemCount - 1) {
+        clearInterval(timer);
+        progressTimers.delete(run.id);
+        return;
+      }
+      run.processedCount += 1;
+      const el = document.querySelector('[data-progress="' + run.id + '"]');
+      if (el) el.textContent = '已处理 ' + run.processedCount + '/' + run.itemCount + ' 题';
+    }, 900);
+    progressTimers.set(run.id, timer);
+  }
+
+  /* =========================================================
+     演示数据：注入运行（验证分页与多页跳转）
+     ========================================================= */
+  const INJECT_SOURCES = ['run-20260914-01', 'run-20260914-02', 'run-20260914-03', 'run-20260914-04'];
+  let injectCounter = 0;
+
+  function injectRuns(n) {
+    const base = new Date(2026, 8, 15, 9, 0, 0);
+    for (let i = 0; i < n; i++) {
+      const k = injectCounter++;
+      const status = (k % 13 === 12) ? 'FAILED' : (k % 11 === 10 ? 'RUNNING' : 'COMPLETED');
+      const src = MockUtil.run(INJECT_SOURCES[k % INJECT_SOURCES.length]);
+      const id = 'run-demo-' + String(k + 1).padStart(3, '0');
+      const created = new Date(base.getTime() + k * 60000);
+      const clone = (v) => JSON.parse(JSON.stringify(v));
+      const items = status === 'FAILED' ? [] : clone(MockUtil.runItems(src.id));
+      const keep = status === 'RUNNING' ? Math.min(items.length, 3 + (k % 5)) : items.length;
+      const run = {
+        id,
+        title: src.title + '（演示副本）',
+        status,
+        datasetId: src.datasetId,
+        datasetName: src.datasetName,
+        datasetType: src.datasetType,
+        datasetVersionNo: src.datasetVersionNo,
+        kbId: src.kbId,
+        kbName: src.kbName,
+        itemCount: src.itemCount,
+        processedCount: keep,
+        createdAt: fmtDT(created),
+        finishedAt: status === 'RUNNING' ? null : fmtDT(new Date(created.getTime() + 5 * 60000)),
+        failureReason: status === 'FAILED' ? '向量化服务不可用：EMBEDDING_MODEL_BASE_URL 连接超时' : null,
+        config: clone(src.config),
+        metrics: status === 'COMPLETED' ? clone(src.metrics) : null,
+        runNote: '原型演示数据：由侧栏演示控制注入，用于验证列表分页与多页跳转；逐题明细与指标与来源运行一致。',
+      };
+      MockData.evalRunItems[id] = items.slice(0, keep);
+      MockData.evalRuns.push(run);
+    }
+    render();
+    SupieUI.toast('已注入 ' + n + ' 条演示运行，当前共 ' + MockData.evalRuns.length + ' 条', 'success');
+  }
+
+  function resetDemoData() {
+    progressTimers.forEach((t) => clearInterval(t));
+    progressTimers.clear();
+    for (let i = MockData.evalRuns.length - 1; i >= 0; i--) {
+      if (INITIAL_RUN_IDS.indexOf(MockData.evalRuns[i].id) < 0) MockData.evalRuns.splice(i, 1);
+    }
+    Object.keys(MockData.evalRunItems).forEach((id) => {
+      if (INITIAL_ITEM_IDS.indexOf(id) < 0) delete MockData.evalRunItems[id];
+    });
+    state.selected.clear();
+    state.datasetId = 'all';
+    state.kbId = 'all';
+    state.page = 1;
+    state.pageSize = 10;
+    renderToolbar();
+    render();
+    SupieUI.toast('已重置为初始 ' + MockData.evalRuns.length + ' 条运行', 'success');
+  }
+
+  /* =========================================================
+     事件绑定与初始化
+     ========================================================= */
+  function init() {
+    SupieUI.initShell('eval');
+    renderToolbar();
+
+    $('#f-ds').addEventListener('change', (e) => { state.datasetId = e.target.value; state.page = 1; render(); });
+    $('#f-kb').addEventListener('change', (e) => { state.kbId = e.target.value; state.page = 1; render(); });
+    $('#btn-new').addEventListener('click', openNewRunModal);
+    $('#btn-compare').addEventListener('click', () => {
+      const ids = Array.from(state.selected);
+      if (ids.length !== 2) { SupieUI.toast('请选择 2 次运行进行对比', 'error'); return; }
+      const runs = ids.map(runById).filter(Boolean).sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+      location.href = 'eval-run.html?base=' + encodeURIComponent(runs[0].id) + '&exp=' + encodeURIComponent(runs[1].id);
+    });
+
+    SupieUI.initProtoTools([
+      {
+        label: '页面状态',
+        control: {
+          type: 'select',
+          options: ['正常', '首屏加载', '加载失败'],
+          value: '正常',
+          onChange: (v) => {
+            state.pageState = v === '正常' ? 'normal' : (v === '首屏加载' ? 'loading' : 'error');
+            render();
+          },
+        },
+      },
+      { label: '分页数据', control: { type: 'button', text: '注入 30 条运行', onClick: () => injectRuns(30) } },
+      { label: '多页跳转', control: { type: 'button', text: '注入至 80 条运行', onClick: () => injectRuns(Math.max(0, 80 - MockData.evalRuns.length)) } },
+      { label: '重置', control: { type: 'button', text: '恢复初始 6 条', onClick: resetDemoData } },
+    ]);
+
+    render();
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

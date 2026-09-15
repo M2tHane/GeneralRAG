@@ -1,0 +1,150 @@
+[
+  {
+    "question": "Redis AOF 默认的 fsync 策略是什么？灾难发生时最多丢多少数据？",
+    "referenceAnswer": "默认策略是 appendfsync everysec（每秒 fsync），性能好且相对安全；灾难发生时最多丢 1 秒的数据。",
+    "evidence": [
+      {
+        "chunkId": "97f10ac5-264f-4f57-970f-c64ee13a1a9e-c0005",
+        "docName": "redis-persistence.md",
+        "titlePath": "redis-persistence.md > 1.3.1. 三种 fsync 策略（appendfsync）",
+        "page": null,
+        "snippet": "everysec：每秒 fsync。……灾难时最多丢 1 秒数据。……建议且默认策略。"
+      }
+    ],
+    "answerable": true,
+    "category": "DIRECT"
+  },
+  {
+    "question": "集群「红着」和「黄着」分别是什么意思？哪个更严重？",
+    "referenceAnswer": "yellow：所有主分片已分配但存在未分配的副本分片，节点故障时部分数据在修复前可能不可用；red：存在未分配的主分片，部分数据不可用。red 更严重。",
+    "evidence": [
+      {
+        "chunkId": "81c6e660-66b8-4c74-83a0-77007a33c9a3-c0002",
+        "docName": "elasticsearch-cluster-health.md",
+        "titlePath": "elasticsearch-cluster-health.md > 1.1. 集群健康状态",
+        "page": null,
+        "snippet": "red：存在未分配的主分片，部分数据不可用。……yellow：所有主分片已分配，但存在未分配的副本分片。"
+      }
+    ],
+    "answerable": true,
+    "category": "TERM_VARIATION"
+  },
+  {
+    "question": "ES 磁盘低水位 85% 和高水位 90% 被触发后的行为分别是什么？",
+    "referenceAnswer": "超过低水位（默认 85%）后，不再向该节点分配新分片；超过高水位（默认 90%）后，ES 开始把分片迁移到磁盘使用率较低的节点。",
+    "evidence": [
+      {
+        "chunkId": "81c6e660-66b8-4c74-83a0-77007a33c9a3-c0003",
+        "docName": "elasticsearch-cluster-health.md",
+        "titlePath": "elasticsearch-cluster-health.md > 1.2. 磁盘水位三阶段",
+        "page": null,
+        "snippet": "低水位 85%：超过后不再向该节点分配新分片；高水位 90%：ES 开始把分片迁移到磁盘使用率较低的节点"
+      }
+    ],
+    "answerable": true,
+    "category": "CONFUSABLE"
+  },
+  {
+    "question": "Kafka 里消费者的 Lag 是怎么定义的？在哪个层级监控？",
+    "referenceAnswer": "Consumer Lag = 分区日志的最新位移（LEO）− 消费者当前已提交/已消费的位移，单位是消息数。Lag 在分区级别监控，通常在主题或消费组级别汇总。",
+    "evidence": [
+      {
+        "chunkId": "cb53c83a-79b6-4368-9938-1ebdc35e5a83-c0004",
+        "docName": "kafka-consumer-groups.md",
+        "titlePath": "kafka-consumer-groups.md > 1.3. 消费位移与 Lag",
+        "page": null,
+        "snippet": "Consumer Lag（消费者滞后量）= 分区日志的最新位移（LEO）− 消费者当前已提交/已消费的位移"
+      }
+    ],
+    "answerable": true,
+    "category": "DIRECT"
+  },
+  {
+    "question": "后端有一个 SSE 流式接口，经过 nginx 代理后前端一直收不到增量数据，最可能的原因和解决办法是什么？",
+    "referenceAnswer": "最可能原因是 nginx 代理缓冲默认开启（proxy_buffering on），nginx 攒够缓冲区才向客户端转发，导致流式响应卡住。解决办法：对该接口的 location 设置 proxy_buffering off，或由后端返回 X-Accel-Buffering: no 响应头动态关闭缓冲。",
+    "evidence": [
+      {
+        "chunkId": "36200ac0-4b4f-4785-bd54-2b35ef0c8ca4-c0002",
+        "docName": "nginx-proxy-buffering.md",
+        "titlePath": "nginx-proxy-buffering.md > 1.1. proxy_buffering 的行为",
+        "page": null,
+        "snippet": "对 SSE（Server-Sent Events）、流式响应或长连接场景，应关闭缓冲：否则 nginx 会攒够缓冲区才向客户端转发"
+      },
+      {
+        "chunkId": "36200ac0-4b4f-4785-bd54-2b35ef0c8ca4-c0004",
+        "docName": "nginx-proxy-buffering.md",
+        "titlePath": "nginx-proxy-buffering.md > 1.3. X-Accel-Buffering 响应头",
+        "page": null,
+        "snippet": "后端应用可以通过在响应中返回 X-Accel-Buffering: yes|no 头，动态地开启或关闭该响应的代理缓冲"
+      }
+    ],
+    "answerable": true,
+    "category": "DIRECT"
+  },
+  {
+    "question": "那磁盘清理完之后要怎么把写入恢复回来？",
+    "referenceAnswer": "（承接 ES 磁盘水位话题）磁盘恢复后只读块不会自动解除：对受影响索引执行 PUT /<索引名>/_settings { \"index.blocks.read_only_allow_delete\": null } 恢复写入，并执行 POST _cluster/reroute?retry_failed=true 重试此前分配失败的分片。",
+    "evidence": [
+      {
+        "chunkId": "81c6e660-66b8-4c74-83a0-77007a33c9a3-c0004",
+        "docName": "elasticsearch-cluster-health.md",
+        "titlePath": "elasticsearch-cluster-health.md > 1.3. 磁盘超限的处理步骤",
+        "page": null,
+        "snippet": "磁盘恢复后，flood_stage 加上的只读块不会自动解除，必须手动恢复……POST _cluster/reroute?retry_failed=true"
+      }
+    ],
+    "answerable": true,
+    "category": "FOLLOW_UP"
+  },
+  {
+    "question": "RDB 和 AOF 的重写/快照在实现机制上有什么相同点？写盘时机有什么不同？",
+    "referenceAnswer": "相同点：都使用 fork 子进程 + 写时复制（copy-on-write）机制，由子进程完成磁盘写入，父进程不直接做磁盘 IO。不同点：RDB 按配置的时间间隔（如 save 60 1000）或手动 SAVE/BGSAVE 做整库快照；AOF 是每条写命令实时追加到日志，文件过大时在后台自动重写为最小命令集并原子切换。",
+    "evidence": [
+      {
+        "chunkId": "97f10ac5-264f-4f57-970f-c64ee13a1a9e-c0006",
+        "docName": "redis-persistence.md",
+        "titlePath": "redis-persistence.md > 1.4. RDB 快照机制",
+        "page": null,
+        "snippet": "Redis fork 出子进程；子进程把数据集写入临时 RDB 文件；完成后原子替换旧文件。依靠写时复制（copy-on-write）语义。"
+      },
+      {
+        "chunkId": "97f10ac5-264f-4f57-970f-c64ee13a1a9e-c0004",
+        "docName": "redis-persistence.md",
+        "titlePath": "redis-persistence.md > 1.3. AOF 的优缺点与刷盘策略",
+        "page": null,
+        "snippet": "AOF……追加式日志……文件过大时 Redis 会在后台自动重写（rewrite）"
+      }
+    ],
+    "answerable": true,
+    "category": "CONFUSABLE"
+  },
+  {
+    "question": "Kafka 消息积压了直接把消费者组的位移重置到最新跳过积压行不行？",
+    "referenceAnswer": "不行。重置位移会丢掉被跳过的消息（丢数据），尤其是业务关键消息。正确做法：优先扩容消费者实例（上限是分区数）、必要时增加分区（注意会破坏按 key 顺序性）、优化消费逻辑的慢调用；极端情况对非关键消息走旁路暂存后补偿处理。",
+    "evidence": [
+      {
+        "chunkId": "cb53c83a-79b6-4368-9938-1ebdc35e5a83-c0006",
+        "docName": "kafka-consumer-groups.md",
+        "titlePath": "kafka-consumer-groups.md > 1.5. 积压的常见原因与处理",
+        "page": null,
+        "snippet": "不要用重置位移的方式跳过消息（会丢数据）"
+      }
+    ],
+    "answerable": true,
+    "category": "TERM_VARIATION"
+  },
+  {
+    "question": "怎么用 Git rebase 整理提交历史？",
+    "referenceAnswer": null,
+    "evidence": [],
+    "answerable": false,
+    "category": "OUT_OF_KB"
+  },
+  {
+    "question": "MySQL 的主从复制延迟怎么解决？",
+    "referenceAnswer": null,
+    "evidence": [],
+    "answerable": false,
+    "category": "OUT_OF_KB"
+  }
+]

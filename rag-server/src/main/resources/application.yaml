@@ -1,0 +1,123 @@
+# =====================================================================
+# rag-server 默认配置。所有环境相关值使用 ${ENV_VAR:默认} 占位；
+# 密钥永远只有环境变量占位形式，不落真实值。本地启动示例见 application-example.yaml。
+# =====================================================================
+server:
+  port: 8080
+
+spring:
+  application:
+    name: rag-server
+
+  # 实现计划环境适配：本机 JDK 17，虚拟线程（Java 21 特性）不启用，
+  # ingestion worker 与 SSE 均为固定大小线程池，行为等价。
+  threads:
+    virtual:
+      enabled: false
+
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB:rag}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true
+    username: ${MYSQL_USER:rag}
+    password: ${MYSQL_PASSWORD:}
+    hikari:
+      maximum-pool-size: 10
+      connection-timeout: 5000
+
+  jpa:
+    hibernate:
+      # 表结构唯一事实来源是 Flyway 迁移；JPA 只做映射校验，绝不自动改表
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc.time_zone: Asia/Shanghai
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 55MB
+
+  # elasticsearch-java 客户端由 Boot 自动装配（ElasticsearchClientAutoConfiguration）
+  elasticsearch:
+    uris: ${ES_URIS:http://localhost:9200}
+    connection-timeout: 5s
+    socket-timeout: 30s
+
+minio:
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+  access-key: ${MINIO_ACCESS_KEY:minioadmin}
+  secret-key: ${MINIO_SECRET_KEY:minioadmin}
+  bucket: rag
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      # 本机/可信内网单用户部署（路线 §7），health 展示 db/es/minio/ragModels 分项便于排障
+      show-details: always
+
+rag:
+  models:
+    # 启动时向 embedding 服务发一次探活并校验维度；模型服务晚于应用启动的本地场景可置 false
+    startup-check: ${RAG_MODELS_STARTUP_CHECK:true}
+    chat:
+      base-url: ${CHAT_MODEL_BASE_URL:}
+      api-key: ${CHAT_MODEL_API_KEY:}
+      model-name: ${CHAT_MODEL_NAME:qwen2.5-7b-instruct}
+      temperature: 0.2
+      timeout-seconds: 120
+      max-history-messages: 8
+    embedding:
+      base-url: ${EMBEDDING_BASE_URL:}
+      api-key: ${EMBEDDING_API_KEY:}
+      model-name: ${EMBEDDING_MODEL_NAME:bge-m3}
+      dimensions: 1024
+      timeout-seconds: 30
+  retrieval:
+    top-k: 6
+    min-score: 0.30
+    max-context-chars: 6000
+    # 检索模式：VECTOR（仅向量，第一轮基线）/ HYBRID（BM25+向量 RRF 融合）/ HYBRID_RERANK（融合+重排）
+    mode: ${RAG_RETRIEVAL_MODE:HYBRID_RERANK}
+    rrf:
+      # RRF 常数；融合分 = Σ 1/(k+rank)，再按 2/(k+1) 归一化到 (0,1]
+      k: 60
+      # 各通道候选数上限：重排成本随候选数增长，需收敛（实测 50 篇 ≈0.5s）
+      candidate-limit: 30
+    rerank:
+      # DashScope 原生重排端点（注意：不是 OpenAI 兼容路径 /compatible-mode/v1，后者返回 404）
+      base-url: ${RERANK_MODEL_BASE_URL:}
+      api-key: ${RERANK_MODEL_API_KEY:}
+      model-name: ${RERANK_MODEL_NAME:qwen3.7-text-rerank}
+      timeout-seconds: 10
+      # true=重排失败回退融合顺序（问答可用性优先，且运行会标注「已降级」）
+      degrade-on-failure: true
+    refusal:
+      # 证据不足即拒答并清空引用（R2-A1）；关闭仅用于与第一轮行为做对照
+      enabled: ${RAG_REFUSAL_ENABLED:true}
+      # 在调优集上校准的启发式阈值（作用于最终排序分）；切换检索模式后需重新校准
+      insufficient-threshold: ${RAG_REFUSAL_THRESHOLD:0.55}
+  ingestion:
+    worker-threads: 2
+    max-upload-size-mb: 50
+    # PDF 解析器：pdfbox（默认，文本层）| mineru（远端 mineru-api，复杂版面/扫描件 OCR）
+    pdf-parser: ${RAG_INGESTION_PDF_PARSER:pdfbox}
+    mineru-base-url: ${MINERU_BASE_URL:}
+    # 扫描件 OCR 较慢，超时按分钟级给
+    mineru-timeout-seconds: ${MINERU_TIMEOUT_SECONDS:600}
+  elasticsearch:
+    # 分块正文分析器；ES 镜像未装 IK 插件时改 standard（见 docker-compose.yml 注释）
+    content-analyzer: ik_max_word
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [rid=%X{requestId}] %logger{40} - %msg%n"
+  level:
+    com.rag: INFO
