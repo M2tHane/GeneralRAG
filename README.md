@@ -90,6 +90,15 @@ Judge 超时/不可用/解析失败                      → JUDGE_DEGRADED（�
 - 实测效果（72 题专项集 A/B）：**False Answer Rate 47.4% → 10.5%**，False Refusal Rate 0% → 5.9%，检索指标零变化；代价是 Judge 调用率 72.2%、平均 +2.6s。
 - 判定关闭：`RAG_ANSWERABILITY_ENABLED=false`（退回旧单阈值行为，仅对照用）；Judge 失败策略 `RAG_ANSWERABILITY_FAIL_CLOSED=true` 切换为保守拒答。
 
+**R4.1 工程稳定化**（`docs/round4/03-R4.1稳定化.md`）：
+- Judge 并发模型从单线程 executor + Future 改为 **Semaphore bulkhead + 同步调用**（`RAG_ANSWERABILITY_MAX_CONCURRENT_JUDGES`，默认 4；`RAG_ANSWERABILITY_BULKHEAD_WAIT_MS`，默认 500）——多请求真实并发，容量耗尽按 OVERLOADED 快速降级；
+- Judge 超时语义单一化：`judge-timeout-seconds` 同时是 HTTP connect/read timeout（模型侧硬取消，无后台孤儿请求；重试关闭）；
+- Judge 与生成使用**同一个 Context 实例**全文（`max-evidence-chars` 已删除，mid-chunk 截断不复存在）；
+- 失败原因四分类可见于调试/评测/日志：TIMEOUT / OVERLOADED / MODEL_ERROR / INVALID_RESPONSE；
+- 新增 `AnswerabilityFlowIT`（accept/refuse/malformed/timeout/低分直拒/SSE 契约顺序全覆盖）；
+- 评测数据集支持可选 `history`（V5 迁移，FOLLOW_UP 指代解析；仅用于理解问题，不构成证据）；
+- 标注指南：`docs/eval/answerability-labeling-guide.md`；answerability 数据集 v2（含标签修订与 FOLLOW_UP history）：`docs/eval/eval-answerability-v2-array.json`。
+
 ### 无模型服务时的体验
 
 `RAG_MODELS_STARTUP_CHECK=false` 可启动用于界面/管理链路验证；此时上传会在 EMBEDDING 阶段失败（原因可读、可重试），问答/调试返回 `RETRIEVAL_FAILED`——这是设计内的降级行为，不是缺陷。重排服务不可达时不会导致问答失败，而是显式降级为融合顺序并在调试页/评测运行中标注「已降级、未重排」。
@@ -109,6 +118,7 @@ pnpm build && pnpm start   # http://localhost:3000（/api 由 Next.js rewrites �
    - 第一轮格式：`docs/eval/eval-tuning-v1.json`（TUNING）/ `eval-test-v1.json`（TEST），evidence 用 docName 锚定（**已退役**）；
    - 第二轮格式：`docs/eval/eval-tuning-v2-array.json` / `eval-test-v2-array.json`，evidence 用**真实 chunkId + 分块级 titlePath** 锚定；
    - 第四轮 Answerability 专项集：`docs/eval/eval-answerability-v1-array.json`（72 题，contentHash 锚点，CONFUSABLE/PARTIAL_EVIDENCE/OUT_OF_KB 占 2/3）；
+   - R4.1 修订版：`docs/eval/eval-answerability-v2-array.json`（3 处标签按标注指南修订 + 6 道 FOLLOW_UP 补 history）；
    - 调优集与独立测试集严格分离，测试集不参与调参；
 3. 发起运行：`POST /api/v1/eval/runs`（datasetId / kbId / 可选 topK、minScore）；
 4. 查看结果：`GET /api/v1/eval/runs/{runId}`（Hit@1/3/5、Recall@5、MRR、拒答正确率、**Answerability 混淆矩阵（TP/FP/FN/TN、False Answer Rate、False Refusal Rate、Judge 调用率/降级率/耗时）、耗时拆分与 p50/p95/max、逐题回答与来源与判定记录**），`PATCH .../items/{itemId}` 人工标注；
@@ -117,7 +127,7 @@ pnpm build && pnpm start   # http://localhost:3000（/api 由 Next.js rewrites �
 ## 5. 测试
 
 ```bash
-cd rag-server && mvn test        # 182 个测试，含 Testcontainers 集成测试套件
+cd rag-server && mvn test        # 200 个测试，含 Testcontainers 集成测试套件（含 AnswerabilityFlowIT）
 cd rag-web    && pnpm test       # vitest；pnpm e2e 需前后端同时在线
 ```
 
@@ -130,6 +140,10 @@ cd rag-web    && pnpm test       # vitest；pnpm e2e 需前后端同时在线
 - **Judge 与生成共用同一模型**（本地单模型约束），判定与生成可能同源偏差；换独立小模型是后续优化点。
 - **Answerability 使 E2E 延迟上升约 1/3**（Judge 平均 2.57s）；对延迟敏感场景可 `RAG_ANSWERABILITY_ENABLED=false` 回退到旧阈值行为。
 - **PARTIAL_EVIDENCE 类别（R4）**：`EvalCategory` 新增枚举值，需 V4 迁移；旧客户端若硬编码枚举需同步。
+
+**R4.1 期间发现的外部依赖限制**
+
+- **rerank/embedding 分数语义绑定供应商模型**：DashScope 账号欠费导致 qwen3.7-text-rerank/qwen3.7-text-embedding 不可用，切换 gte-rerank-v2/text-embedding-v4 后重排分分布完全不同——**低分阈值必须随 reranker 模型重新校准**，不能跨模型沿用；更换 embedding 模型必须重建全部 KB 索引（向量空间不一致）。
 
 **第二轮引入/变更的口径限制（必读）**
 

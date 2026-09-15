@@ -50,7 +50,7 @@ Invoke the workspace skills explicitly (Skill tool, by skill name) when you want
 - `$supie-edit` — scoped feature change; supports `fast|standard|strict`.
 - `$supie-fix` — root-cause bug fix; supports `fast|standard|strict`.
 
-## Project state (updated after R4-Answerability, 2026-09-15)
+## Project state (updated after R4.1-Answerability Stabilization, 2026-09-16)
 
 **Current status**: rounds 1–2 complete; round 3 P1/P2/P3 complete (format expansion; MinerU
 OCR with explicit `PARSER_UNAVAILABLE`, no silent fallback; document versioning with Flyway V3
@@ -74,6 +74,24 @@ answerable score distributions fully overlap (both reach 1.000). Result: False A
 (TP/FP/FN/TN, falseAnswerRate = FP/(FP+TN), falseRefusalRate = FN/(FN+TP), judge invocation/
 degradation rate). SSE adds an `ANSWERABILITY_CHECKED` stage event (clients must tolerate
 unknown stage values). EvalCategory gains `PARTIAL_EVIDENCE`.
+R4.1 (Answerability stabilization, no new RAG capabilities) hardened the judge layer:
+single-thread executor + Future replaced by **Semaphore bulkhead + synchronous call**
+(`max-concurrent-judges` default 4, `bulkhead-wait-ms` 500; exhaustion → OVERLOADED
+fail-fast); judge timeout now has a single meaning (it IS the judge HTTP connect/read
+timeout, retries disabled — no orphaned background request); judge sees the **same
+Context instance in full** as generation (`max-evidence-chars` deleted, no mid-chunk
+substring); failure reasons classified TIMEOUT/OVERLOADED/MODEL_ERROR/INVALID_RESPONSE
+in decision reason. New `AnswerabilityFlowIT` (7 scenarios: accept/refuse/malformed/
+timeout/low-score/SSE-contract) runs with answerability ENABLED. Eval datasets support
+optional `history` (Flyway V5) so FOLLOW_UP items actually test follow-up semantics —
+history feeds prompt/judge coreference zones only, never evidence, retrieval still uses
+the current question only. Labeling guide `docs/eval/answerability-labeling-guide.md`
++ dataset v2 (`eval-answerability-v2-array.json`: 3 label fixes 59/60/70 per guide,
+all 6 residual R4 FP/FN re-audited, SYSTEM_ERROR=0). **OpenAPI `HIGH_CONFIDENCE_ACCEPT`
+removed** (V4 migration comment left immutable; type never emitted). Full re-eval and
+real-model concurrency smoke **blocked**: both DashScope accounts in Arrearage — also
+proved rerank score semantics are model-bound (gte-rerank-v2 ≈0.45 vs qwen3.7-text-rerank
+≈0.9+ on answerable items), so the 0.65 low threshold must be recalibrated per reranker.
 The system is a locally runnable, measurably effective RAG:
 ingestion (pdf/md/txt/**docx/xlsx/csv**; xlsx/csv+STRUCTURE → spreadsheet-aware chunking;
 PDF parser selectable `pdfbox|mineru` via `rag.ingestion.pdf-parser`) →
@@ -85,9 +103,13 @@ answerability confusion matrix + two-run comparison with comparability guard).
 
 - Round-4 records: `docs/round4/01-Baseline分析.md` (baseline score distributions + Bad Case
   enumeration + why highThreshold was rejected), `02-实施记录.md` (final architecture, threshold
-  provenance, A/B table, residual FP/FN per item, limitations)
+  provenance, A/B table, residual FP/FN per item, limitations), `03-R4.1稳定化.md`
+  (stabilization: judge concurrency/timeout semantics/evidence consistency/FlowIT/contract/
+  FOLLOW_UP history/label guide + the external-blocker record)
 - Round-4 eval material: `docs/eval/eval-answerability-v1-array.json` (72 items, contentHash
-  anchors; generator `scripts/gen-answerability-dataset.py`); KB `b78b6fb8` (7 docs / 44 chunks)
+  anchors; generator `scripts/gen-answerability-dataset.py`), **v2**: `docs/eval/eval-answerability-v2-array.json`
+  (labels fixed per guide + FOLLOW_UP history), guide `docs/eval/answerability-labeling-guide.md`;
+  KB `b78b6fb8` (7 docs / 44 chunks; re-embedded on text-embedding-v4 during R4.1)
 - Round-3 records: `docs/round3/01-实施记录-P1.md`, `02-实施记录-P2.md`, `03-实施记录-P3.md`,
   `04-实施记录-R4Excel.md`
 - Scanned-PDF sample for retesting: `docs/eval-corpus/redis-scanned.pdf` (image-only, no text layer)
@@ -97,17 +119,21 @@ answerability confusion matrix + two-run comparison with comparability guard).
 - Progress & round-3 plan: `docs/round2/03-进度与第三轮计划.md`
 - Round-2 implementation record: `docs/round2/02-实施记录.md`
 - Round-1 handoff: `docs/HANDOFF.md`
-- Test counts cited anywhere: backend 182 (`mvn test`), frontend 30 (vitest). Re-verify before relying on them.
+- Test counts cited anywhere: backend 200 (`mvn test`), frontend 30 (vitest). Re-verify before relying on them.
 
 **Dead config watch**: `rag.retrieval.refusal.insufficient-threshold` / `RAG_REFUSAL_THRESHOLD`
 were dead keys (removed in R4). Refusal thresholds are `rerank-threshold` /
-`cosine-threshold` (+ `rag.answerability.*` for the judge). Do not reintroduce undocumented keys.
+`cosine-threshold` (+ `rag.answerability.*` for the judge). `max-evidence-chars` was
+removed in R4.1 (judge now gets the full shared Context — do not reintroduce partial-evidence
+truncation). Do not reintroduce undocumented keys.
 
 **Remaining scope** (direction only; user approval per material step):
-re-audit PARTIAL_EVIDENCE expected labels in answerability-v1 (4 residual FPs were partly
-over-strict dataset expectations), second corpus per new format, reliability hardening (P4),
+finish the blocked R4.1 eval re-run after the DashScope accounts recover (baseline → threshold
+recalibration for gte-rerank-v2 → R4.1 run → concurrency smoke; checklist in
+`docs/round4/03-R4.1稳定化.md` §8), second corpus per new format, reliability hardening (P4),
 structured Excel retrieval (row-level ES fields + filter/range queries) driven by real
-BadCase attribution, code-file format support. Query Rewrite / Parent-Child / Metadata Filter /
+BadCase attribution, code-file format support. Label re-audit of answerability-v1 is DONE
+(v2 dataset + guide). Query Rewrite / Parent-Child / Metadata Filter /
 GraphRAG have **no Bad Case support yet** (Hit@3=1.0; all R4 Bad Cases were in the judging /
 generation layer) — do not add them without new evidence.
 

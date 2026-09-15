@@ -3,41 +3,69 @@
   "flow": "supie-dev",
   "mode": "standard",
   "status": "completed",
-  "goal": "第四轮：Evidence Answerability（两阶段门控 + 灰区 LLM Judge）——72 题专项集 + Baseline 分析 + AnswerabilityPolicy 实现 + A/B 对照",
-  "baseline": "round3-completed (git 94dc5f4 pushed; archive .supie/state/archive/)",
+  "goal": "R4.1 Answerability Stabilization：Judge 并发/超时语义/Evidence 一致性 + FlowIT + 契约对齐 + FOLLOW_UP history + 标签复核",
+  "baseline": "r4-completed (git da6b74e..0948dde 4 commits + docs; R4 push 7f38355)",
   "current_stage": 6,
   "stages": {
-    "1": {"status": "completed", "approved": true, "note": "用户以长篇需求直接批准方案：B+A 排除 C；数据集先行→Baseline→分析→实现→A/B 的严格顺序"},
-    "2": {"status": "skipped", "note": "无新页面/旅程（复用既有评测/调试页，仅加字段），用户明示直接实现"},
-    "3": {"status": "completed", "approved": true, "note": "contracts/openapi.yaml 更新（EvalCategory/SSE stage/Debug answerability/混淆矩阵/refused 落库），用户批准的方案内"},
-    "5": {"status": "completed", "note": "V4__answerability_eval.sql（category CHECK 扩展 + eval_run_item 决策 6 列）"},
-    "6": {"status": "completed", "note": "AnswerabilityPolicy/Judge/Chat/Debug/Eval 全链路 + 25 新单测 + 回归 182/182 + A/B 对照完成"}
+    "1": {
+      "status": "completed",
+      "approved": true,
+      "note": "用户以 26 节需求直接下达 R4.1 目标与边界（无新 RAG 能力，8 步顺序）"
+    },
+    "2": {
+      "status": "skipped",
+      "note": "无新页面/旅程（复用既有评测/调试/前端 stage 行）"
+    },
+    "3": {
+      "status": "completed",
+      "approved": true,
+      "note": "openapi 删 HIGH_CONFIDENCE_ACCEPT + history 字段说明；OpenApiDriftTest 绿"
+    },
+    "5": {
+      "status": "completed",
+      "note": "V5__eval_dataset_item_history.sql 已应用（flyway v5）"
+    },
+    "6": {
+      "status": "completed",
+      "note": "4 个逻辑 commit（da6b74e/4563b29/abbe87b/0948dde）+ guide/v2 数据集/文档；mvn 200×2 / 前端 30 / lint / build 全绿"
+    }
   },
   "verification": [
     {
-      "label": "r4-backend-tests",
+      "label": "r41-backend-tests",
       "result": "pass",
-      "at": "2026-09-15T23:30:00+08:00",
-      "command": "mvn test ×2 → 182/182 稳定（+25 新测试：AnswerabilityPolicyTest 12 / EvidenceSufficiencyJudgeTest 13）"
+      "at": "2026-09-16T01:45:00+08:00",
+      "command": "mvn test ×2 → 200/200（含 AnswerabilityFlowIT 7、policy 14、judge 17、parser 17、OpenApiDriftTest）"
     },
     {
-      "label": "r4-frontend",
+      "label": "r41-frontend",
       "result": "pass",
-      "at": "2026-09-15T23:35:00+08:00",
+      "at": "2026-09-16T01:47:00+08:00",
       "command": "pnpm test 30/30; pnpm lint 0 warning; pnpm build 9 路由"
     },
     {
-      "label": "r4-smoke-real",
+      "label": "r41-flowit",
       "result": "pass",
-      "at": "2026-09-15T23:45:00+08:00",
-      "command": "真实模型 4 例 debug 冒烟 + 2 例 SSE 流冒烟（事件序列/拒答 citations=[]）"
+      "at": "2026-09-16T01:40:00+08:00",
+      "command": "AnswerabilityFlowIT 7/7：accept/refuse/malformed/timeout(硬取消+名额释放)/low-score/SSE 契约/准备"
     },
     {
-      "label": "r4-ab-eval",
+      "label": "r41-v5-migration",
       "result": "pass",
-      "at": "2026-09-15T23:55:00+08:00",
-      "command": "Baseline c85c4c50 vs 新策略 aabf8eb7（72 题）：FAR 47.4%→10.5%，FRR 0→5.9%，检索指标零变化",
-      "note": "详见 docs/round4/02-实施记录.md"
+      "at": "2026-09-16T01:11:36+08:00",
+      "command": "flyway: Migrating schema to version 5 - eval dataset item history; column verified via SHOW COLUMNS"
+    },
+    {
+      "label": "r41-kb-reembed",
+      "result": "pass",
+      "at": "2026-09-16T01:16:00+08:00",
+      "command": "KB b78b6fb8 重建：7 docs/44 chunks 全 COMPLETED（text-embedding-v4 重嵌入 + gte-rerank-v2）"
+    },
+    {
+      "label": "r41-eval-rerun",
+      "result": "blocked",
+      "at": "2026-09-16T01:32:00+08:00",
+      "command": "BLOCKED: DashScope 两账号 Arrearage（chat/embedding/rerank 全 403）。run 8fbe8cc9 数据残缺不可用。恢复后清单见 docs/round4/03-R4.1稳定化.md §8"
     }
   ],
   "started_at": "2026-09-15T22:00:00+08:00",
