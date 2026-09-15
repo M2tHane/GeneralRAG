@@ -201,6 +201,9 @@ public class EvidenceSufficiencyJudge {
             }
             throw new JudgeUnavailableException(
                     "MODEL_ERROR: Judge 模型调用失败：" + e.getMessage(), e);
+        } finally {
+            // 无论成功/失败/中断都必须释放许可，否则一次调用泄漏就永久缩减容量
+            bulkhead.release();
         }
     }
 

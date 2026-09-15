@@ -65,6 +65,10 @@ public class ModelClients {
                 .modelName(chat.getModelName())
                 .temperature(0.0)
                 .timeout(Duration.ofSeconds(judgeTimeoutSeconds))
+                // 判定超时必须语义单一：一次 HTTP 尝试的超时就是判定超时。
+                // langchain4j 默认重试 2 次会把 2s 超时放大成 6s——关闭重试，
+                // 失败即抛出（上层按 JUDGE_DEGRADED 降级，重试对短 JSON 判定无收益）
+                .maxRetries(0)
                 .build();
     }
 

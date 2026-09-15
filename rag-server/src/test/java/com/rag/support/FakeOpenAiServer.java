@@ -43,6 +43,22 @@ public class FakeOpenAiServer {
     /** 供用例读取模型收到了什么 prompt（断言历史/证据分区）。 */
     private final List<String> lastChatPrompts = new ArrayList<>();
 
+    // ---- R4.1：非流式（Judge）请求的定向控制（与流式生成互相独立） ----
+    /** 非流式响应内容（Judge 输出）；null = 走默认 chatAnswer。 */
+    private volatile String nonStreamAnswer;
+    /** 非流式请求额外延迟（毫秒）：模拟 Judge 模型慢响应/超时。 */
+    private volatile long nonStreamDelayMs = 0;
+    /** 非流式请求失败（500）：模拟 Judge 模型不可用。 */
+    private final AtomicBoolean nonStreamFailure = new AtomicBoolean(false);
+    /** 已收到的非流式请求计数（断言"Judge 被调/未被调"）。 */
+    private final java.util.concurrent.atomic.AtomicInteger nonStreamCount =
+            new java.util.concurrent.atomic.AtomicInteger();
+    /** 并发非流式请求的活跃数峰值（断言 bulkhead 并发语义）。 */
+    private final java.util.concurrent.atomic.AtomicInteger nonStreamActive =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger nonStreamActiveMax =
+            new java.util.concurrent.atomic.AtomicInteger();
+
     public void start() throws IOException {
         server = HttpServer.create(new java.net.InetSocketAddress(0), 0);
         port = server.getAddress().getPort();
@@ -108,14 +124,30 @@ public class FakeOpenAiServer {
             Thread.sleep(chatDelayMs);
         }
         if (!stream) {
-            respond(exchange, 200, Map.of(
-                    "id", "chatcmpl-fake", "object", "chat.completion",
-                    "choices", List.of(Map.of(
-                            "index", 0,
-                            "message", Map.of("role", "assistant", "content", chatAnswer),
-                            "finish_reason", "stop")),
-                    "usage", Map.of("prompt_tokens", 1, "completion_tokens", 1, "total_tokens", 2)));
-            return;
+            // R4.1：非流式请求（Judge 路径）定向控制
+            nonStreamCount.incrementAndGet();
+            int active = nonStreamActive.incrementAndGet();
+            nonStreamActiveMax.accumulateAndGet(active, Math::max);
+            try {
+                if (nonStreamFailure.get()) {
+                    respond(exchange, 500, Map.of("error", Map.of("message", "judge failure (test)")));
+                    return;
+                }
+                if (nonStreamDelayMs > 0) {
+                    Thread.sleep(nonStreamDelayMs);
+                }
+                String answer = nonStreamAnswer != null ? nonStreamAnswer : chatAnswer;
+                respond(exchange, 200, Map.of(
+                        "id", "chatcmpl-fake", "object", "chat.completion",
+                        "choices", List.of(Map.of(
+                                "index", 0,
+                                "message", Map.of("role", "assistant", "content", answer),
+                                "finish_reason", "stop")),
+                        "usage", Map.of("prompt_tokens", 1, "completion_tokens", 1, "total_tokens", 2)));
+                return;
+            } finally {
+                nonStreamActive.decrementAndGet();
+            }
         }
         // SSE 流式
         exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
@@ -125,14 +157,14 @@ public class FakeOpenAiServer {
             for (int i = 0; i < answer.length(); i += 4) {
                 String delta = answer.substring(i, Math.min(i + 4, answer.length()));
                 // 注意：Map.of 不允许 null 值（会 NPE），含 null 的字段一律用 HashMap
-                out.write(("data: " + JSON.writeValueAsString(chunk(Map.of("content", delta), null)))
+                out.write(("data: " + JSON.writeValueAsString(chunk(Map.of("content", delta), null)) + "\n\n")
                         .getBytes(StandardCharsets.UTF_8));
                 out.flush();
                 if (chatTokenDelayMs > 0) {
                     Thread.sleep(chatTokenDelayMs);
                 }
             }
-            out.write(("data: " + JSON.writeValueAsString(chunk(new java.util.HashMap<>(), "stop")))
+            out.write(("data: " + JSON.writeValueAsString(chunk(new java.util.HashMap<>(), "stop")) + "\n\n")
                     .getBytes(StandardCharsets.UTF_8));
             out.write("data: [DONE]\n\n".getBytes(StandardCharsets.UTF_8));
             out.flush();
@@ -180,6 +212,36 @@ public class FakeOpenAiServer {
 
     public void setEmbedFailure(boolean fail) {
         this.embedFailure.set(fail);
+    }
+
+    // ---- R4.1：非流式（Judge）定向控制 ----
+
+    /** 设置非流式响应内容（Judge 输出）；传 null 恢复默认（同 chatAnswer）。 */
+    public void setNonStreamAnswer(String answer) {
+        this.nonStreamAnswer = answer;
+    }
+
+    public void setNonStreamDelayMs(long ms) {
+        this.nonStreamDelayMs = ms;
+    }
+
+    public void setNonStreamFailure(boolean fail) {
+        this.nonStreamFailure.set(fail);
+    }
+
+    public int nonStreamRequestCount() {
+        return nonStreamCount.get();
+    }
+
+    public void resetNonStreamCounters() {
+        nonStreamCount.set(0);
+        nonStreamActive.set(0);
+        nonStreamActiveMax.set(0);
+    }
+
+    /** 并发非流式请求活跃数峰值（bulkhead 并发断言用）。 */
+    public int nonStreamActiveMax() {
+        return nonStreamActiveMax.get();
     }
 
     public List<String> lastChatPrompts() {
