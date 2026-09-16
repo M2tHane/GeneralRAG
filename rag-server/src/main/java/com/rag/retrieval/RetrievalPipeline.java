@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
 import com.rag.config.RagProperties;
 import com.rag.domain.exception.DomainException;
 import com.rag.domain.exception.ErrorCode;
+import com.rag.eval.EvidenceMatcher;
 import com.rag.retrieval.model.RetrievalHit;
 import com.rag.retrieval.model.RetrievalMode;
 import com.rag.retrieval.model.RetrievalStages;
@@ -92,7 +93,9 @@ public class RetrievalPipeline {
                         Math.max(topK, candidateLimit));
         long searchMs = System.currentTimeMillis() - searchStart;
 
-        // R5-B：阶段候选轨迹（真实执行路径顺带收集，非第二套 pipeline）
+        // R5-B：阶段候选轨迹（真实执行路径顺带收集，非第二套 pipeline）。
+        // R5.1：候选携带证据锚点（titlePath + contentHash(answerContent)），
+        // 使证据掉出 final topK 时仍可被 StageMetrics 定位前序阶段名次
         List<RetrievalTrace.StageCandidate> vectorCandidates = toCandidates(vectorHits);
         List<RetrievalTrace.StageCandidate> bm25Candidates = toCandidates(bm25Hits);
 
@@ -110,7 +113,8 @@ public class RetrievalPipeline {
         for (RetrievalHit h : ordered) {
             fusedCandidates.add(new RetrievalTrace.StageCandidate(
                     h.chunk().chunkId(), fusedRank++, h.stages().fusedScore() != null
-                            ? h.stages().fusedScore() : h.score()));
+                            ? h.stages().fusedScore() : h.score(),
+                    h.chunk().titlePath(), com.rag.eval.EvidenceMatcher.contentHashOf(h.chunk().content())));
         }
 
         // 阶段 4：KB-9 已删文档有效性过滤（ES 删除为补偿任务异步执行，主档删除即边界收口）
@@ -140,7 +144,8 @@ public class RetrievalPipeline {
                 for (RetrievalHit h : ordered) {
                     rerankedCandidates.add(new RetrievalTrace.StageCandidate(
                             h.chunk().chunkId(), rr++, h.stages().rerankScore() != null
-                                    ? h.stages().rerankScore() : h.score()));
+                                    ? h.stages().rerankScore() : h.score(),
+                            h.chunk().titlePath(), com.rag.eval.EvidenceMatcher.contentHashOf(h.chunk().content())));
                 }
             }
         }
@@ -183,12 +188,13 @@ public class RetrievalPipeline {
                 trace);
     }
 
-    /** EsHit 序（即该通道 rank 序）→ 轻量阶段候选。 */
+    /** EsHit 序（即该通道 rank 序）→ 轻量阶段候选（含证据锚点；不携带正文）。 */
     private static List<RetrievalTrace.StageCandidate> toCandidates(List<EsHit> hits) {
         List<RetrievalTrace.StageCandidate> candidates = new ArrayList<>(hits.size());
         int rank = 1;
         for (EsHit hit : hits) {
-            candidates.add(new RetrievalTrace.StageCandidate(hit.chunkId(), rank++, hit.score()));
+            candidates.add(new RetrievalTrace.StageCandidate(hit.chunkId(), rank++, hit.score(),
+                    hit.titlePath(), EvidenceMatcher.contentHashOf(hit.content())));
         }
         return candidates;
     }

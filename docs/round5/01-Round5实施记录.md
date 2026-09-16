@@ -106,3 +106,68 @@ sweep 时的分布形态一致（可答题仍集中 0.95+，无关题 ≈0）。
   DebugRetrievalConsistencyIT 1、EsChunkIndexMappingTest 5
 - R5-B：StageMetricsTest 7、EvalFlowIT 8、DebugRetrievalConsistencyIT 1
 - R5-C：ExcelDualLayerChunkingTest 6、SpreadsheetChunkerTest 9
+
+---
+
+## R5.1 Correctness 修复（2026-09-16，基线 3639d31）
+
+### 1. retrieval_content mapping 迁移（非破坏）
+
+**实测发现**：开发索引 `rag_chunks_v1.retrieval_content` 确为动态 mapping 创建
+（带 `fields.keyword` 子字段、analyzer=default/standard），与 content 的
+ik_max_word 不一致——"与 content 同 analyzer"在此索引上不成立。
+
+**修复**：`ensureIndex()` 对已存在索引执行 mapping 检查：
+- 字段缺失 → PUT mapping 补齐（text + 当前 analyzer），旧 chunk 读侧回退 content；
+- analyzer 一致 → 继续；
+- analyzer 不一致 → **启动即报错**，明确要求人工 reindex/rebuild，禁止自动破坏。
+
+**实际处置**：当前开发索引属于不一致情形；按报告-不静默处理原则，删除该**派生**
+索引（0 数据丢失——chunks 全部可由 MySQL/MinIO 原始文档重建），后端重启后
+`ensureIndex` 以正确 analyzer 重建，8 文档 48 chunks 重新 ingest 验证。
+
+### 2. BM25 真正 fallback
+
+`should(retrieval_content) should(content) minShould=1` 会让新 chunk 同时吃两份
+正文 BM25 分。改为 exists 分支：
+
+```text
+(retrieval_content exists AND match retrieval_content)
+OR (retrieval_content missing AND match content)
+```
+
+新 chunk 只吃 retrieval_content 一份分数；旧 chunk 保持 content 可检索。
+
+### 3. Stage eval 修正（evidence-anchor 快照）
+
+`StageCandidate` 扩展 `titlePath` + `contentHash`（answerContent 哈希，收集点
+现算，**trace 不携带正文**）；`StageMetrics.evaluateItem` 不再依赖最终 topK 的
+EsHit，直接把各阶段候选映射为 `EvidenceMatcher.CandidateRef` 复用既有的
+`firstMatchRankInSnapshot`（无新写匹配逻辑）。证据被 rerank 淘汰出 final topK
+后仍可定位 vector/bm25/rrf 名次。
+
+### 4. Stage degradation 回归
+
+`StageDegradationTest`（3 用例，走 evaluateItem 真实匹配路径）：vector=5/bm25=3/
+rrf=8/rerank=20/final=MISS → Vector/BM25/RRF Recall@30 全 HIT、Rerank@6 MISS、
+degraded=1、finalRank=null；含 contentHash-only 锚点与"rerank 彻底掉出"变体。
+
+### 5. Excel retrieval 定向（3+1 case，真实 fixture）
+
+数据行问题（华东 A Q2 销售额）→ RowGroup 命中；Sheet 说明问题 → 产品说明
+RowGroup 命中（跨 Sheet 不串）；字段清单问题 → Sheet Summary 命中；
+RowGroup 的 retrievalContent 带元数据前缀而 answerContent 无 enricher 虚构。
+
+### 6. 修正后 Comparable Eval（run `2756f6c0`，同环境同参数）
+
+| Metric | R5 修正前（27502106） | R5.1 修正后（2756f6c0） |
+| --- | - | - |
+| Hit@1 / 3 / 5 | 0.8571 / 0.9429 / 0.9429 | 同 |
+| MRR | 0.8952 | 0.8952 |
+| Vector/BM25/Union/RRF Recall@30 | 1.0×4 | 1.0×4（**口径修正后仍然全 1.0**） |
+| Rerank Recall@6 | 1.0 | 1.0 |
+| promoted / degraded / stable | 9 / 3 / 21 | **7 / 3 / 23**（2 chunk 由 promoted 重新归为 stable——旧路径锚点来自 final-topK EsHit，rank 比较受 topK 截断失真；修正后以全候选快照为准） |
+| FAR / FRR | 5.41% / 5.71% | 同 |
+| Judge degraded | 0% | 0% |
+
+**以修正后指标为准**，Round 5 报告中的 promoted/degraded/stable 已更新口径。

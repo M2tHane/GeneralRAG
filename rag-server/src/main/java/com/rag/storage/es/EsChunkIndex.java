@@ -15,6 +15,8 @@ import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryResponse;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
+import co.elastic.clients.elasticsearch.indices.GetMappingResponse;
+import co.elastic.clients.elasticsearch._types.mapping.Property;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.transport.endpoints.BooleanResponse;
 import com.rag.config.RagProperties;
@@ -60,7 +62,7 @@ public class EsChunkIndex {
         this.vectorDims = ragProperties.getModels().getEmbedding().getDimensions();
     }
 
-    /** 索引不存在则创建；每次调用都先探测分析器可用性（不可用 = 拒绝启动）。 */
+    /** 索引不存在则创建；存在则做 retrieval_content mapping 迁移检查；每次调用都先探测分析器可用性。 */
     public void ensureIndex() {
         try {
             BooleanResponse exists = client.indices().exists(e -> e.index(INDEX_NAME));
@@ -69,10 +71,54 @@ public class EsChunkIndex {
                 createIndex();
                 log.info("已创建 ES 索引 {}（别名 {}，analyzer={}，vector dims={}）",
                         INDEX_NAME, ALIAS_NAME, contentAnalyzer, vectorDims);
+            } else {
+                migrateRetrievalContentMapping();
             }
         } catch (IOException e) {
             throw esUnavailable(e);
         }
+    }
+
+    /**
+     * R5.1：已有索引的 retrieval_content mapping 兼容迁移（非破坏）。
+     *
+     * <p>背景：R5-A 之前的旧索引没有该字段；若索引先于本修复遇到写入，
+     * 动态 mapping 会以默认 analyzer（standard）建字段，与 content 的
+     * {@code contentAnalyzer}（如 ik_max_word）不一致。</p>
+     *
+     * <ul>
+     *   <li>字段不存在 → PUT mapping 补齐（type=text + 当前 analyzer）；
+     *       ES 支持对已有索引新增 text 字段，旧文档该字段为空（读侧回退 content）；</li>
+     *   <li>字段存在且 analyzer 一致 → 正常继续；</li>
+     *   <li>字段存在但 analyzer 不一致 → <b>不自动删索引/重建数据</b>，
+     *       明确报错要求人工 reindex。</li>
+     * </ul>
+     */
+    private void migrateRetrievalContentMapping() throws IOException {
+        GetMappingResponse mapping = client.indices()
+                .getMapping(g -> g.index(INDEX_NAME));
+        var properties = mapping.result().get(INDEX_NAME).mappings().properties();
+        Property existing = properties.get("retrieval_content");
+        if (existing == null) {
+            client.indices().putMapping(p -> p.index(INDEX_NAME)
+                    .properties("retrieval_content",
+                            pr -> pr.text(t -> t.analyzer(contentAnalyzer))));
+            log.info("已为既有索引 {} 补齐 retrieval_content mapping（analyzer={}）；"
+                    + "旧 chunk 该字段为空，检索回退 content，重新 ingest 后生效",
+                    INDEX_NAME, contentAnalyzer);
+            return;
+        }
+        String actualAnalyzer = existing.text() == null ? null : existing.text().analyzer();
+        if (contentAnalyzer.equals(actualAnalyzer)) {
+            return; // 一致：正常继续
+        }
+        throw new DomainException(ErrorCode.INTERNAL_ERROR,
+                "Elasticsearch 索引 " + INDEX_NAME + " 的 retrieval_content analyzer 为 '"
+                        + (actualAnalyzer == null ? "default" : actualAnalyzer)
+                        + "'，与配置的 '" + contentAnalyzer + "' 不一致。"
+                        + "text 字段 analyzer 无法就地修改——请人工处理：删除该字段不可行，"
+                        + "需 reindex（新建索引→_reindex→切别名）或清空后重新 ingest。"
+                        + "本系统拒绝以错误的分词器继续检索。");
     }
 
     /**
@@ -207,11 +253,16 @@ public class EsChunkIndex {
             SearchResponse<Map> response = client.search(s -> s
                             .index(INDEX_NAME)
                             .query(q -> q.bool(b -> b
-                                    // R5-A：优先检索增强字段；旧 chunk 无 retrieval_content 时
-                                    // 该子查询自然无命中，content 兜底保证旧数据仍可检索
+                                    // R5.1：真正的 fallback 语义——新 chunk 只吃
+                                    // retrieval_content 的 BM25 分，旧 chunk（无该字段）
+                                    // 回退 content；同一 chunk 不会两份正文叠加
                                     .must(m -> m.bool(inner -> inner
-                                            .should(sh -> sh.match(mt -> mt.field("retrieval_content").query(question)))
-                                            .should(sh -> sh.match(mt -> mt.field("content").query(question)))
+                                            .should(sh -> sh.bool(newChunk -> newChunk
+                                                    .filter(fv -> fv.exists(e -> e.field("retrieval_content")))
+                                                    .must(mm -> mm.match(mt -> mt.field("retrieval_content").query(question)))))
+                                            .should(sh -> sh.bool(oldChunk -> oldChunk
+                                                    .mustNot(fv -> fv.exists(e -> e.field("retrieval_content")))
+                                                    .must(mm -> mm.match(mt -> mt.field("content").query(question)))))
                                             .minimumShouldMatch("1")))
                                     .filter(f -> f.term(t -> t.field("knowledge_base_id").value(kbId)))))
                             .size(Math.max(1, topK)),

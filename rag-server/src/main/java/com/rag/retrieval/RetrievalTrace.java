@@ -32,8 +32,19 @@ public record RetrievalTrace(
         List<String> finalTopK,
         StageTiming timing) {
 
-    /** 阶段候选：chunkId + 该阶段名次（1 起）+ 该阶段分数。 */
-    public record StageCandidate(String chunkId, int rank, double score) {
+    /**
+     * 阶段候选：chunkId + 该阶段名次（1 起）+ 该阶段分数 + 证据锚点
+     * （R5.1：titlePath 与 contentHash=answerContent 哈希，在 trace 收集点
+     * 由 EsHit 透传/现算——<b>不携带正文</b>，供 StageMetrics 在证据掉出
+     * final topK 时仍能用 EvidenceMatcher 锚点定位前序阶段名次）。
+     */
+    public record StageCandidate(String chunkId, int rank, double score,
+                                 String titlePath, String contentHash) {
+
+        /** 兼容旧构造（无锚点：单测直接构造用）。 */
+        public StageCandidate(String chunkId, int rank, double score) {
+            this(chunkId, rank, score, null, null);
+        }
     }
 
     /**

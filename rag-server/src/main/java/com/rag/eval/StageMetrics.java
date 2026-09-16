@@ -109,39 +109,45 @@ public final class StageMetrics {
     }
 
     /**
-     * 单题判定。
+     * 单题判定（R5.1：evidence-anchor 快照路径）。
+     *
+     * <p>不再依赖最终 topK 的 EsHit：trace 的各阶段候选自带
+     * {@code titlePath}/{@code contentHash}（answerContent 哈希，收集点现算，
+     * trace 不携带正文），直接映射为 {@link EvidenceMatcher.CandidateRef}，
+     * 复用 {@link EvidenceMatcher#firstMatchRankInSnapshot}——证据即使被 rerank
+     * 淘汰出 final topK，仍可在 vector/bm25/rrf/rerank 各阶段定位名次。</p>
      *
      * @param evidence 数据集证据（docName/titlePath/chunkId/contentHash 锚点）
      * @param trace    真实执行收集的阶段轨迹
-     * @param hitsById 聚合各阶段出现过的 chunkId → EsHit（供 EvidenceMatcher 锚点匹配）
      */
     public static ItemStageResult evaluateItem(List<Map<String, Object>> evidence,
-                                               RetrievalTrace trace,
-                                               Map<String, com.rag.storage.es.EsHit> hitsById) {
+                                               RetrievalTrace trace) {
         int evidenceCount = evidence == null ? 0 : evidence.size();
-        if (evidenceCount == 0 || trace == null || evidenceChunkCandidates(trace, hitsById).isEmpty()) {
+        if (evidenceCount == 0 || trace == null || trace.unionCandidates().isEmpty()) {
             return new ItemStageResult(null, null, null, null, null, null, null, null, evidenceCount);
         }
-        // 证据 → chunkId：把每个候选阶段的 chunkId 序转成 EsHit 序，复用 firstMatchRank
+        // 证据 → chunkId：各阶段快照独立匹配（锚点同源：firstMatchRankInSnapshot）
         Set<String> evidenceChunkIds = new java.util.HashSet<>();
         for (Map<String, Object> ev : evidence) {
-            // 各阶段独立匹配：同一证据可能在 vector 有 hash 命中而 BM25 序里也出现
             for (List<RetrievalTrace.StageCandidate> stage : List.of(
                     trace.vectorCandidates(), trace.bm25Candidates(),
                     trace.fusedCandidates(), trace.rerankedCandidates())) {
-                List<com.rag.storage.es.EsHit> ordered = new ArrayList<>();
-                for (RetrievalTrace.StageCandidate c : stage) {
-                    com.rag.storage.es.EsHit hit = hitsById.get(c.chunkId());
-                    if (hit != null) {
-                        ordered.add(hit);
-                    }
-                }
-                if (EvidenceMatcher.firstMatchRank(ev, ordered) > 0) {
-                    evidenceChunkIds.add(firstMatchedChunkId(ev, ordered));
+                int rank = EvidenceMatcher.firstMatchRankInSnapshot(ev, toRefs(stage));
+                if (rank > 0) {
+                    evidenceChunkIds.add(stage.get(rank - 1).chunkId());
                 }
             }
         }
         return evaluateByIds(evidenceChunkIds, evidenceCount, trace);
+    }
+
+    /** 阶段候选 → 轻量证据锚点快照（CandidateRef；无正文）。 */
+    private static List<EvidenceMatcher.CandidateRef> toRefs(List<RetrievalTrace.StageCandidate> stage) {
+        List<EvidenceMatcher.CandidateRef> refs = new ArrayList<>(stage.size());
+        for (RetrievalTrace.StageCandidate c : stage) {
+            refs.add(new EvidenceMatcher.CandidateRef(c.contentHash(), c.chunkId(), c.titlePath()));
+        }
+        return refs;
     }
 
     /** 证据 chunkId 已知时的纯 trace 计算（单测直接构造 trace 使用）。 */
@@ -186,30 +192,10 @@ public final class StageMetrics {
                 reranked ? stable : null, evidenceCount);
     }
 
-    private static String firstMatchedChunkId(Map<String, Object> evidence,
-                                              List<com.rag.storage.es.EsHit> ordered) {
-        for (com.rag.storage.es.EsHit hit : ordered) {
-            if (EvidenceMatcher.firstMatchRank(evidence, List.of(hit)) > 0) {
-                return hit.chunkId();
-            }
-        }
-        return null;
-    }
-
     private static int countHits(Set<String> evidenceIds,
                                  List<RetrievalTrace.StageCandidate> stage, int k) {
         return (int) stage.stream().limit(k)
                 .filter(c -> evidenceIds.contains(c.chunkId())).count();
     }
 
-    private static Set<String> evidenceChunkCandidates(RetrievalTrace trace,
-                                                       Map<String, com.rag.storage.es.EsHit> hitsById) {
-        Set<String> ids = new java.util.HashSet<>();
-        for (RetrievalTrace.StageCandidate c : trace.unionCandidates()) {
-            if (hitsById.containsKey(c.chunkId())) {
-                ids.add(c.chunkId());
-            }
-        }
-        return ids;
-    }
 }

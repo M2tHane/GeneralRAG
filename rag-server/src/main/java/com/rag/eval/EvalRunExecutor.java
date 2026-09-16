@@ -373,20 +373,12 @@ public class EvalRunExecutor {
                     }
                 }
             }
-            // R5-B：stage 召回/重排判定（answerable 且执行成功才参与）
+            // R5-B/R5.1：stage 召回/重排判定——走 evidence-anchor 快照路径，
+            // 证据被 rerank 淘汰出 final topK 仍可定位前序阶段名次
             if (item.isAnswerable() && !executionFailed && answer != null && trace != null) {
-                Map<String, EsHit> hitsById = new java.util.LinkedHashMap<>();
-                for (RetrievalTrace.StageCandidate c : trace.unionCandidates()) {
-                    for (RetrievalHit candidate : hits) {
-                        if (candidate.chunk().chunkId().equals(c.chunkId())) {
-                            hitsById.put(c.chunkId(), candidate.chunk());
-                            break;
-                        }
-                    }
-                }
                 List<Map<String, Object>> evidenceList = item.getEvidence() == null
                         ? List.of() : item.getEvidence();
-                stageAgg.add(StageMetrics.evaluateItem(evidenceList, trace, hitsById));
+                stageAgg.add(StageMetrics.evaluateItem(evidenceList, trace));
             }
 
             runItemRepository.save(runItem);
