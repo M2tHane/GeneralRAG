@@ -42,7 +42,10 @@ class ExcelDualLayerChunkingTest {
             sales.getRow(1).createCell(3).setCellValue(120);
             sales.getRow(1).createCell(4).setCellValue(0.85);
             sales.getRow(1).getCell(4).setCellStyle(percentStyle(wb));
-            sales.getRow(1).createCell(5).setCellValue("2026-06-30");
+            // 真日期 cell（非字符串伪日期）：LocalDate + yyyy-mm-dd 样式，
+            // 验证 DataFormatter 对日期类型的显示值还原
+            sales.getRow(1).createCell(5).setCellValue(java.time.LocalDate.of(2026, 6, 30));
+            sales.getRow(1).getCell(5).setCellStyle(dateStyle(wb));
             sales.createRow(2).createCell(0).setCellValue("B");
             sales.getRow(2).createCell(1).setCellValue("华南");
             sales.getRow(2).createCell(2).setCellValue(80);
@@ -78,6 +81,13 @@ class ExcelDualLayerChunkingTest {
         return style;
     }
 
+    /** yyyy-mm-dd 日期格式（内置格式 id 14 = m/d/yy，自定义为 164+ 保证精确样式）。 */
+    private static org.apache.poi.ss.usermodel.CellStyle dateStyle(XSSFWorkbook wb) {
+        org.apache.poi.ss.usermodel.CellStyle style = wb.createCellStyle();
+        style.setDataFormat(wb.createDataFormat().getFormat("yyyy-mm-dd"));
+        return style;
+    }
+
     @Test
     void bothSheetsPresentWithHeadings() {
         assertThat(parsed.text()).contains("## 区域销售").contains("## 产品说明");
@@ -87,6 +97,14 @@ class ExcelDualLayerChunkingTest {
     void percentageFormattedAsDisplayValue() {
         assertThat(parsed.text()).contains("85%").contains("72%");
         assertThat(parsed.text()).doesNotContain("0.85 |"); // 不是原始小数
+    }
+
+    @Test
+    void realDateCellFormattedAsDisplayValue() {
+        // 真日期 cell（LocalDate + yyyy-mm-dd 样式）经 DataFormatter 还原为显示值；
+        // 若解析器拿到的是原始序列号（如 46203）或字符串伪日期，此处即失败
+        assertThat(parsed.text()).contains("2026-06-30");
+        assertThat(parsed.text()).doesNotContain("| 46203 "); // 非日期序列号
     }
 
     @Test

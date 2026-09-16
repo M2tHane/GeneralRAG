@@ -171,3 +171,69 @@ RowGroup 的 retrievalContent 带元数据前缀而 answerContent 无 enricher �
 | Judge degraded | 0% | 0% |
 
 **以修正后指标为准**，Round 5 报告中的 promoted/degraded/stable 已更新口径。
+
+## R5.2 最后收尾（fix: close Round 5 edge cases）
+
+### 1. rerank degradation 过滤边界修正（R5.2 主修复）
+
+**问题**：`fusedCandidates` 在 `filterDeletedDocs`/`filterInactiveVersions` 之前记录，
+被 filter 淘汰的 chunk 携带 rrfRank 而无 rerankRank，被 `StageMetrics` 误算为
+"reranker degraded"——但它实际从未进入重排器。
+
+**修复**：`RetrievalTrace` 新增 `preRerankCandidates`（filter 之后、重排器之前记录，
+含证据锚点），`StageRanks` 增加 `preRerankRank`；promoted/degraded/stable 的比较基线
+从 rrfRank 改为 preRerankRank。**RRF 阶段召回（rrfRecall@30）仍基于真正的 RRF 融合
+候选（fusedCandidates），两个口径不混用**。消费方同步更新：EvalRunExecutor 的
+per-item stageRanks 输出增加 `preRerank` 键；DebugRetrievalService/DebugResult 的
+trace payload 增加 preRerankCandidates/preRerankRank 字段。
+
+新增回归（`StageMetricsTest.filterRemovedCandidateIsNotRerankerDegraded` 与
+`StageDegradationTest.filterRemovedCandidateIsNotRerankerDegraded`，后者走
+evaluateItem 真实锚点匹配路径）：证据 rrf 可见、filter 后消失 → rrfRecall=1、
+rerankDegraded=0、rerankStable=1（存活证据）且 stable/degraded 均不为它计数；
+`degradedStillCountedWhenRerankerDropsCandidateEntirely` 改为验证"真进过重排器
+（preRerank 可见）但重排输出消失"仍计 degraded。
+
+### 2. mapping migration 定向测试
+
+新增 `EsChunkIndexMigrationTest`（Mockito 桩 ES client，不依赖真实 ES）：
+- 字段不存在 → PUT mapping 补齐 retrieval_content，analyzer = 当前 contentAnalyzer
+  （捕获 Function 参数在全新 Builder 上执行校验）；
+- 字段存在且 analyzer 一致 → 无任何写入；
+- 字段存在但 analyzer 不一致（含 non-text 变体 keyword 形态）→ fail-fast，
+  且验证 **delete index 与 reindex 从未被调用**。
+
+顺带修复：`migrateRetrievalContentMapping` 对 non-text 字段变体（keyword 等）原会
+抛 langchain 客户端的 `IllegalStateException`（`Cannot get 'Text' variant`），改为
+`existing.isText()` 守卫后走统一的 fail-fast DomainException。
+
+### 3. Excel fixture 真日期 cell
+
+`ExcelDualLayerChunkingTest` 的日期由字符串 `setCellValue("2026-06-30")` 改为真日期：
+`setCellValue(LocalDate.of(2026, 6, 30))` + `yyyy-mm-dd` 样式；新增
+`realDateCellFormattedAsDisplayValue`（DataFormatter 输出 "2026-06-30"，且非序列号
+46203）。百分比/公式/空单元格测试全部保留，7/7 通过。
+
+### 4. destructive action 硬约束
+
+AGENTS.md 新增「Destructive actions require explicit authorization【HARD CONSTRAINT】」
+章节（位于 Repository boundary 与 Completion standard 之间）：DELETE ES index、
+DROP/TRUNCATE 表、批量删除开发数据、丢弃派生数据的 migration、强制覆盖不可恢复资源
+均需用户明确授权；即使"理论上可重建"也不得自行判断后执行；允许 检测/报告/给出处置
+方案/等待授权；禁止"这是派生数据，所以我直接删了"。
+
+### 5. 相关测试结果（改哪里测哪里，无全量 mvn test）
+
+| Suite | Tests run | Failures |
+| --- | - | - |
+| StageMetricsTest | 8 | 0 |
+| StageDegradationTest | 4 | 0 |
+| EsChunkIndexMigrationTest（新增） | 4 | 0 |
+| EsChunkIndexMappingTest | 5 | 0 |
+| ExcelDualLayerChunkingTest | 7 | 0 |
+| ExcelRetrievalOrientationTest | 4 | 0 |
+| OfficeParserTest | 11 | 0 |
+
+threshold 0.75 / Judge / Answerability / embedding / reranker / RRF 参数 / topK /
+candidateLimit / BM25 fallback / Excel chunking 结构 / Java AST / PDF AUTO / VLM
+均未触碰。前端未改，未跑前端测试。

@@ -100,6 +100,7 @@ public final class DebugResult {
             List<StageCandidatePayload> bm25Candidates,
             List<StageCandidatePayload> unionCandidates,
             List<StageCandidatePayload> fusedCandidates,
+            List<StageCandidatePayload> preRerankCandidates,
             List<StageCandidatePayload> rerankedCandidates,
             List<String> finalTopK,
             List<StageRanksPayload> ranks) {
@@ -109,7 +110,8 @@ public final class DebugResult {
 
         /** 每 chunk 的跨阶段位次（null = 该阶段未召回）。 */
         public record StageRanksPayload(String chunkId, Integer vectorRank, Integer bm25Rank,
-                                        Integer rrfRank, Integer rerankRank, Integer finalRank) {
+                                        Integer rrfRank, Integer preRerankRank,
+                                        Integer rerankRank, Integer finalRank) {
         }
     }
 }

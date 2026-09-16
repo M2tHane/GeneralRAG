@@ -108,7 +108,7 @@ public class EsChunkIndex {
                     INDEX_NAME, contentAnalyzer);
             return;
         }
-        String actualAnalyzer = existing.text() == null ? null : existing.text().analyzer();
+        String actualAnalyzer = existing.isText() ? existing.text().analyzer() : null;
         if (contentAnalyzer.equals(actualAnalyzer)) {
             return; // 一致：正常继续
         }

@@ -254,6 +254,7 @@ public class EvalRunExecutor {
                         ranks.put("vector", r.vectorRank());
                         ranks.put("bm25", r.bm25Rank());
                         ranks.put("rrf", r.rrfRank());
+                        ranks.put("preRerank", r.preRerankRank());
                         ranks.put("rerank", r.rerankRank());
                         ranks.put("final", r.finalRank());
                         evalHitRow.put("stageRanks", ranks);

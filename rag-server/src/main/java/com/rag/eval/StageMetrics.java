@@ -20,9 +20,11 @@ import java.util.Set;
  *   <li>Vector/BM25/RRF Recall@30：≥1 个证据 chunk 出现在该阶段前 30 名的题数比例；</li>
  *   <li>Union Recall：≥1 个证据 chunk 被任一通道召回（无 K 截断）；</li>
  *   <li>Rerank Recall@6：重排后前 6（= 默认 topK）；未重排（VECTOR/降级）→ null；</li>
- *   <li>promoted/degraded/stable：对融合序与重排序均有名次的证据 chunk 比较——
+ *   <li>promoted/degraded/stable：对 preRerank 序（deleted/inactive filter 之后、
+ *       进入重排器的候选，R5.2）与重排序均有名次的证据 chunk 比较——
  *       变小 = promoted，变大或掉出候选 = degraded，不变 = stable。
- *       分母 = 融合序可见的证据 chunk 数（如实标注，不掺 N/A）。</li>
+ *       分母 = preRerank 序可见的证据 chunk 数（被 filter 淘汰的 chunk 没进
+ *       重排器，不算 reranker degraded；如实标注，不掺 N/A）。</li>
  * </ul>
  */
 public final class StageMetrics {
@@ -131,7 +133,8 @@ public final class StageMetrics {
         for (Map<String, Object> ev : evidence) {
             for (List<RetrievalTrace.StageCandidate> stage : List.of(
                     trace.vectorCandidates(), trace.bm25Candidates(),
-                    trace.fusedCandidates(), trace.rerankedCandidates())) {
+                    trace.fusedCandidates(), trace.preRerankCandidates(),
+                    trace.rerankedCandidates())) {
                 int rank = EvidenceMatcher.firstMatchRankInSnapshot(ev, toRefs(stage));
                 if (rank > 0) {
                     evidenceChunkIds.add(stage.get(rank - 1).chunkId());
@@ -168,10 +171,10 @@ public final class StageMetrics {
             Map<String, RetrievalTrace.StageRanks> ranks = trace.ranksByChunk();
             for (String id : evidenceChunkIds) {
                 RetrievalTrace.StageRanks r = ranks.get(id);
-                if (r == null || r.rrfRank() == null) {
-                    continue; // 融合序不可见的证据不参与 rerank 前后比较
+                if (r == null || r.preRerankRank() == null) {
+                    continue; // 过滤后不可见（未进重排器）的证据不参与 rerank 前后比较
                 }
-                Integer before = r.rrfRank();
+                Integer before = r.preRerankRank();
                 Integer after = r.rerankRank();
                 if (after == null) {
                     degraded++; // 重排后掉出候选

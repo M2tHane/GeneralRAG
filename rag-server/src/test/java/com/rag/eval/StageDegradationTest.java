@@ -34,7 +34,7 @@ class StageDegradationTest {
     void evidenceSurvivesRerankButDroppedFromFinalTopK() {
         // vector rank=5, bm25 rank=3, rrf rank=8, rerank rank=20（掉出 rerank@6），
         // final topK 不含证据 chunk（rerank 只保留 20 个候选）
-        RetrievalTrace trace = buildTrace(true);
+        RetrievalTrace trace = buildTrace(true, true);
 
         StageMetrics.ItemStageResult r = StageMetrics.evaluateItem(evidence(), trace);
 
@@ -42,7 +42,7 @@ class StageDegradationTest {
         assertThat(r.bm25RecallHit()).isEqualTo(1);     // BM25 Recall@30 = HIT
         assertThat(r.rrfRecallHit()).isEqualTo(1);      // RRF Recall@30 = HIT
         assertThat(r.rerankRecallHit()).isZero();       // Rerank Recall@6 = MISS（rank 20 > 6）
-        // promote/degrade：rrf 8 → rerank 20 = degraded
+        // promote/degrade：preRerank 8 → rerank 20 = degraded
         assertThat(r.rerankDegraded()).isEqualTo(1);
         assertThat(r.rerankPromoted()).isZero();
         assertThat(r.rerankStable()).isZero();
@@ -52,6 +52,7 @@ class StageDegradationTest {
         assertThat(ranks.vectorRank()).isEqualTo(5);
         assertThat(ranks.bm25Rank()).isEqualTo(3);
         assertThat(ranks.rrfRank()).isEqualTo(8);
+        assertThat(ranks.preRerankRank()).isEqualTo(8);
         assertThat(ranks.rerankRank()).isEqualTo(20);
         assertThat(ranks.finalRank()).isNull();
     }
@@ -59,7 +60,7 @@ class StageDegradationTest {
     @Test
     void evidenceFoundPurelyByContentHashWhenChunkIdUnknown() {
         // 数据集生成于旧 chunk 结构（chunkId 已变）：只剩 contentHash 锚点可用
-        RetrievalTrace trace = buildTrace(true);
+        RetrievalTrace trace = buildTrace(true, true);
         List<Map<String, Object>> hashOnly = List.of(Map.of("contentHash", EVIDENCE_HASH));
         StageMetrics.ItemStageResult r = StageMetrics.evaluateItem(hashOnly, trace);
         assertThat(r.vectorRecallHit()).isEqualTo(1);
@@ -68,18 +69,38 @@ class StageDegradationTest {
 
     @Test
     void degradedStillCountedWhenRerankerDropsCandidateEntirely() {
-        // 更极端：rerank 候选列表里彻底没有该 chunk（rerankRank = null）
-        RetrievalTrace trace = buildTrace(false);
+        // 更极端：重排器（真见过该 chunk）输出里彻底没有它（rerankRank = null）→ degraded
+        RetrievalTrace trace = buildTrace(true, false);
         StageMetrics.ItemStageResult r = StageMetrics.evaluateItem(evidence(), trace);
         assertThat(r.vectorRecallHit()).isEqualTo(1);
         assertThat(r.rerankRecallHit()).isZero();
-        assertThat(r.rerankDegraded()).isEqualTo(1); // rrf 可见 → rerank 消失 = degraded
+        assertThat(r.rerankDegraded()).isEqualTo(1); // preRerank 可见 → 重排后消失 = degraded
         RetrievalTrace.StageRanks ranks = trace.ranksByChunk().get("ev-1");
+        assertThat(ranks.preRerankRank()).isEqualTo(8);
+        assertThat(ranks.rerankRank()).isNull();
+    }
+
+    @Test
+    void filterRemovedCandidateIsNotRerankerDegraded() {
+        // R5.2 回归：证据在 RRF 中存在（rrf=8），但被 deleted/inactive filter 淘汰
+        // （preRerank 无名次）→ 未进入重排器，不计为 reranker degraded。
+        // RRF 阶段召回基于真正的 RRF 候选：rrfRecallHit = 1 不受影响。
+        RetrievalTrace trace = buildTrace(false, false);
+        StageMetrics.ItemStageResult r = StageMetrics.evaluateItem(evidence(), trace);
+        assertThat(r.rrfRecallHit()).isEqualTo(1);
+        assertThat(r.rerankRecallHit()).isZero();
+        assertThat(r.rerankDegraded()).isZero();   // 未进重排器 → NOT reranker degraded
+        assertThat(r.rerankPromoted()).isZero();
+        assertThat(r.rerankStable()).isZero();
+        RetrievalTrace.StageRanks ranks = trace.ranksByChunk().get("ev-1");
+        assertThat(ranks.rrfRank()).isEqualTo(8);
+        assertThat(ranks.preRerankRank()).isNull(); // filter 淘汰的直接证据
         assertThat(ranks.rerankRank()).isNull();
     }
 
     /**
-     * @param includeInRerank rerank 候选是否包含证据（false = 彻底掉出）
+     * @param passedFilter  证据是否通过 deleted/inactive filter（false = preRerank 淘汰）
+     * @param includedInRerank 重排器输出是否包含证据（false = 彻底掉出）
      */
     private static List<RetrievalTrace.StageCandidate> filler(int startRank, int count, double score) {
         return java.util.stream.IntStream.range(0, count)
@@ -90,7 +111,7 @@ class StageDegradationTest {
                 .toList();
     }
 
-    private static RetrievalTrace buildTrace(boolean includeInRerank) {
+    private static RetrievalTrace buildTrace(boolean passedFilter, boolean includedInRerank) {
         // vector rank=5（前 4 个 filler）
         List<RetrievalTrace.StageCandidate> vector = new java.util.ArrayList<>(filler(1, 4, 0.9));
         vector.add(new RetrievalTrace.StageCandidate("ev-1", 5, 0.85,
@@ -103,9 +124,16 @@ class StageDegradationTest {
         List<RetrievalTrace.StageCandidate> fused = new java.util.ArrayList<>(filler(1, 7, 0.02));
         fused.add(new RetrievalTrace.StageCandidate("ev-1", 8, 0.016,
                 EVIDENCE_TITLE_PATH, EVIDENCE_HASH));
+        // preRerank：通过 filter 则位次不变（8），否则淘汰
+        List<RetrievalTrace.StageCandidate> preRerank = new java.util.ArrayList<>();
+        if (passedFilter) {
+            preRerank.addAll(fused);
+        } else {
+            preRerank.addAll(filler(1, 7, 0.02));
+        }
         // rerank rank=20（19 个 filler 挤在前面）或彻底掉出
         List<RetrievalTrace.StageCandidate> reranked = new java.util.ArrayList<>(filler(1, 19, 0.95));
-        if (includeInRerank) {
+        if (includedInRerank) {
             reranked.add(new RetrievalTrace.StageCandidate("ev-1", 20, 0.55,
                     EVIDENCE_TITLE_PATH, EVIDENCE_HASH));
         }
@@ -115,7 +143,7 @@ class StageDegradationTest {
         return new RetrievalTrace(vector, bm25, List.of(
                         new RetrievalTrace.StageCandidate("ev-1", 1, 0),
                         new RetrievalTrace.StageCandidate("filler-union", 2, 0)),
-                fused, reranked, finalTopK,
+                fused, preRerank, reranked, finalTopK,
                 new RetrievalTrace.StageTiming(10, 30, 1, 40, 81));
     }
 }

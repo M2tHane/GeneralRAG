@@ -601,6 +601,30 @@ Never read unrelated repositories, home-directory secrets, global private files,
 
 For prototype walkthroughs and implementation verification, use the explicitly authorized local application or disposable test environment. Keep browser actions within the delegated page/task scope; do not treat verification as permission to change unrelated data or environments.
 
+## Destructive actions require explicit authorization【HARD CONSTRAINT】
+
+> Any destructive operation must be explicitly authorized by the user before execution. No exceptions.
+
+Covered operations include, but are not limited to:
+
+- `DELETE` an Elasticsearch index (or dropping/overwriting an index's data);
+- `DROP` / `TRUNCATE` a database table;
+- bulk deletion of development data (batch deletes in MySQL/ES/MinIO or the filesystem);
+- a migration/rebuild that discards existing derived data;
+- force-overwriting an unrecoverable resource.
+
+Even if the data is "theoretically rebuildable", the agent must not decide on its own and execute. "Derived data can be regenerated" is a rationale for the user to weigh, not a license for the agent to act.
+
+Allowed without prior authorization:
+
+- detect and report the condition (e.g. a mis-mapped index, stale derived data);
+- propose a disposal plan with consequences (what is lost, how it would be rebuilt);
+- wait for explicit user authorization.
+
+Forbidden:
+
+- reasoning such as "this is derived data, so I deleted it".
+
 ## Completion standard
 
 A Supie task is complete only when the level of evidence matches the risk.

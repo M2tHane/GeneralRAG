@@ -15,19 +15,24 @@ import java.util.stream.Collectors;
  * 不保存正文。VECTOR 模式无 BM25/RRF 通道（空列表）；rerank 降级时
  * {@code rerankedCandidates} 为空。</p>
  *
- * @param vectorCandidates  向量通道候选（kNN 召回，rank = 余弦序）
- * @param bm25Candidates    BM25 通道候选（rank = BM25 序）
- * @param unionCandidates   两通道并集（chunkId 去重后的候选总量）
- * @param fusedCandidates   RRF 融合后候选（rank = 融合序）
+ * @param vectorCandidates   向量通道候选（kNN 召回，rank = 余弦序）
+ * @param bm25Candidates     BM25 通道候选（rank = BM25 序）
+ * @param unionCandidates    两通道并集（chunkId 去重后的候选总量）
+ * @param fusedCandidates    RRF 融合后候选（rank = 融合序；RRF 阶段召回口径以此为准）
+ * @param preRerankCandidates 进入重排阶段的候选（R5.2：在 deleted/inactive filter
+ *                            <b>之后</b>记录，rank = 过滤后序）。rerank 升降级归因
+ *                            以它为比较基线——被 filter 淘汰的 chunk 没有进入重排器，
+ *                            不得记为 reranker degraded
  * @param rerankedCandidates 重排后候选（rank = 重排序；未重排/降级为空）
- * @param finalTopK         最终返回的 topK chunkId（有序）
- * @param timing            各阶段耗时（毫秒）
+ * @param finalTopK          最终返回的 topK chunkId（有序）
+ * @param timing             各阶段耗时（毫秒）
  */
 public record RetrievalTrace(
         List<StageCandidate> vectorCandidates,
         List<StageCandidate> bm25Candidates,
         List<StageCandidate> unionCandidates,
         List<StageCandidate> fusedCandidates,
+        List<StageCandidate> preRerankCandidates,
         List<StageCandidate> rerankedCandidates,
         List<String> finalTopK,
         StageTiming timing) {
@@ -60,7 +65,7 @@ public record RetrievalTrace(
     /** 空轨迹（构建失败前的占位）。 */
     public static RetrievalTrace empty(StageTiming timing) {
         return new RetrievalTrace(List.of(), List.of(), List.of(), List.of(), List.of(),
-                List.of(), timing);
+                List.of(), List.of(), timing);
     }
 
     /** 指定 chunk 在某阶段的名次（未出现返回 null——"该阶段未召回"是有效信息）。 */
@@ -81,6 +86,7 @@ public record RetrievalTrace(
                         rankOf(c.chunkId(), vectorCandidates),
                         rankOf(c.chunkId(), bm25Candidates),
                         rankOf(c.chunkId(), fusedCandidates),
+                        rankOf(c.chunkId(), preRerankCandidates),
                         rankOf(c.chunkId(), rerankedCandidates),
                         finalTopK.indexOf(c.chunkId()) >= 0
                                 ? finalTopK.indexOf(c.chunkId()) + 1 : null),
@@ -90,10 +96,11 @@ public record RetrievalTrace(
     /**
      * BadCase 下钻视图：同一 chunk 在各阶段的位次（null = 该阶段未召回/未重排）。
      *
-     * @param vectorRank 向量名次；bm25Rank BM25 名次；rrfRank 融合名次；
-     *                   rerankRank 重排名次；finalRank 最终 topK 名次（1 起）
+     * @param vectorRank    向量名次；bm25Rank BM25 名次；rrfRank 融合名次；
+     *                      preRerankRank 过滤后进入重排的名次（R5.2）；
+     *                      rerankRank 重排名次；finalRank 最终 topK 名次（1 起）
      */
     public record StageRanks(Integer vectorRank, Integer bm25Rank, Integer rrfRank,
-                             Integer rerankRank, Integer finalRank) {
+                             Integer preRerankRank, Integer rerankRank, Integer finalRank) {
     }
 }

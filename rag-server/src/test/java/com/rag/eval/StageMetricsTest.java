@@ -20,12 +20,13 @@ class StageMetricsTest {
         return new RetrievalTrace.StageCandidate(id, rank, score);
     }
 
-    /** 常规轨迹：vector [e1,e2,x]，bm25 [x,e1]，fused [e1,x,e2]，rerank [x,e1,e2]。 */
+    /** 常规轨迹：vector [e1,e2,x]，bm25 [x,e1]，fused [e1,x,e2]，preRerank/rerank [x,e1,e2]。 */
     private static RetrievalTrace trace() {
         return new RetrievalTrace(
                 List.of(c("e1", 1, 0.9), c("e2", 2, 0.8), c("x1", 3, 0.7)),
                 List.of(c("x1", 1, 12.0), c("e1", 2, 8.0)),
                 List.of(c("e1", 1, 0), c("e2", 2, 0), c("x1", 3, 0)),
+                List.of(c("e1", 1, 0.03), c("x1", 2, 0.02), c("e2", 3, 0.016)),
                 List.of(c("e1", 1, 0.03), c("x1", 2, 0.02), c("e2", 3, 0.016)),
                 List.of(c("x1", 1, 0.95), c("e1", 2, 0.9), c("e2", 3, 0.8)),
                 List.of("x1", "e1", "e2"),
@@ -66,11 +67,12 @@ class StageMetricsTest {
 
     @Test
     void promotedWhenRerankImprovesRank() {
-        // e1: rrf 2 → rerank 1 = promoted；e2: rrf 3 → 掉出 rerank = degraded
+        // e1: preRerank 2 → rerank 1 = promoted；e2: preRerank 1 → 掉出 rerank = degraded
         RetrievalTrace t = new RetrievalTrace(
                 List.of(c("e1", 1, 0.9)),
                 List.of(),
                 List.of(c("e1", 1, 0), c("e2", 2, 0)),
+                List.of(c("e2", 1, 0.02), c("e1", 2, 0.016)),
                 List.of(c("e2", 1, 0.02), c("e1", 2, 0.016)),
                 List.of(c("e1", 1, 0.95)),
                 List.of("e1"),
@@ -88,7 +90,7 @@ class StageMetricsTest {
         RetrievalTrace t = new RetrievalTrace(
                 List.of(c("e1", 1, 0.9)),
                 List.of(), List.of(c("e1", 1, 0)),
-                List.of(), List.of(), List.of("e1"),
+                List.of(), List.of(), List.of(), List.of("e1"),
                 new RetrievalTrace.StageTiming(1, 2, 0, 0, 3));
         StageMetrics.ItemStageResult r = StageMetrics.evaluateByIds(
                 Set.of("e1"), 1, t);
@@ -97,6 +99,29 @@ class StageMetricsTest {
         assertThat(r.rrfRecallHit()).isZero();
         assertThat(r.rerankRecallHit()).isNull();
         assertThat(r.rerankPromoted()).isNull();
+    }
+
+    @Test
+    void filterRemovedCandidateIsNotRerankerDegraded() {
+        // R5.2 回归：证据在 RRF 中存在（rrf=2），但被 deleted/inactive filter 淘汰
+        // （preRerank 无名次）→ 没有进入重排器，不得记为 reranker degraded。
+        // RRF 阶段召回仍基于真正 RRF 候选：rrfRecallHit = 1 不受影响。
+        RetrievalTrace t = new RetrievalTrace(
+                List.of(c("e1", 1, 0.9), c("e2", 2, 0.8)),
+                List.of(c("e2", 1, 12.0), c("e1", 2, 8.0)),
+                List.of(c("e1", 1, 0), c("e2", 2, 0)),
+                List.of(c("e1", 1, 0.03), c("e2", 2, 0.02)),   // RRF 融合序：两者都在
+                List.of(c("e1", 1, 0.03)),                      // filter 后：e2 被淘汰
+                List.of(c("e1", 1, 0.95)),                      // 重排只见过 e1
+                List.of("e1"),
+                new RetrievalTrace.StageTiming(1, 2, 1, 3, 7));
+        StageMetrics.ItemStageResult r = StageMetrics.evaluateByIds(
+                Set.of("e1", "e2"), 2, t);
+        assertThat(r.rrfRecallHit()).isEqualTo(1);        // RRF 阶段召回：e2 在 RRF 前 30 → HIT
+        assertThat(r.rerankRecallHit()).isEqualTo(1);     // e1 重排 rank1 → HIT
+        assertThat(r.rerankDegraded()).isZero();          // e2 未进重排器 → NOT degraded
+        assertThat(r.rerankPromoted()).isZero();
+        assertThat(r.rerankStable()).isEqualTo(1);        // e1: preRerank 1 → rerank 1
     }
 
     @Test

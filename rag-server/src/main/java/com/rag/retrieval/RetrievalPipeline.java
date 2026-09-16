@@ -124,6 +124,18 @@ public class RetrievalPipeline {
         // 旧版本分块在 ES 中保留（可切回），但检索不再命中
         ordered = filterInactiveVersions(ordered);
 
+        // R5.2：preRerank 候选在 filter 之后记录——被 deleted/inactive 过滤淘汰的
+        // chunk 没有进入重排器，rerank 升降级归因不得把它算成 degraded。
+        // 注意与 fusedCandidates（RRF 阶段召回口径）区分，两个概念不混用。
+        List<RetrievalTrace.StageCandidate> preRerankCandidates = new ArrayList<>(ordered.size());
+        int preRank = 1;
+        for (RetrievalHit h : ordered) {
+            preRerankCandidates.add(new RetrievalTrace.StageCandidate(
+                    h.chunk().chunkId(), preRank++, h.stages().fusedScore() != null
+                            ? h.stages().fusedScore() : h.score(),
+                    h.chunk().titlePath(), com.rag.eval.EvidenceMatcher.contentHashOf(h.chunk().content())));
+        }
+
         // 阶段 5：重排（仅 HYBRID_RERANK；失败按配置降级并留痕）
         boolean rerankDegraded = false;
         String rerankDegradeReason = null;
@@ -180,8 +192,8 @@ public class RetrievalPipeline {
         }
         List<String> finalTopK = ranked.stream().map(h -> h.chunk().chunkId()).toList();
         RetrievalTrace trace = new RetrievalTrace(vectorCandidates, bm25Candidates,
-                unionCandidates, fusedCandidates, rerankedCandidates, finalTopK,
-                new RetrievalTrace.StageTiming(embedMs, searchMs, fusionMs, rerankMs, totalMs));
+                unionCandidates, fusedCandidates, preRerankCandidates, rerankedCandidates,
+                finalTopK, new RetrievalTrace.StageTiming(embedMs, searchMs, fusionMs, rerankMs, totalMs));
         return new RetrievalOutcome(ranked, new RetrievalDiagnostics(
                 mode, topK, minScore, candidateLimit, cfg.getRrf().getK(),
                 embedMs, searchMs, totalMs, rerankDegraded, rerankDegradeReason, rerankApplied),

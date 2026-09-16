@@ -110,13 +110,15 @@ public class DebugRetrievalService {
                 trace.ranksByChunk().entrySet().stream()
                         .map(e -> new DebugResult.RetrievalTracePayload.StageRanksPayload(
                                 e.getKey(), e.getValue().vectorRank(), e.getValue().bm25Rank(),
-                                e.getValue().rrfRank(), e.getValue().rerankRank(), e.getValue().finalRank()))
+                                e.getValue().rrfRank(), e.getValue().preRerankRank(),
+                                e.getValue().rerankRank(), e.getValue().finalRank()))
                         .toList();
         return new DebugResult.RetrievalTracePayload(
                 trace.vectorCandidates().stream().map(map).toList(),
                 trace.bm25Candidates().stream().map(map).toList(),
                 trace.unionCandidates().stream().map(map).toList(),
                 trace.fusedCandidates().stream().map(map).toList(),
+                trace.preRerankCandidates().stream().map(map).toList(),
                 trace.rerankedCandidates().stream().map(map).toList(),
                 trace.finalTopK(), ranks);
     }
