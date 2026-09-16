@@ -41,9 +41,11 @@ public class XlsxParser implements DocumentParser {
         StringBuilder text = new StringBuilder();
         int tableCount = 0;
         try (XSSFWorkbook workbook = new XSSFWorkbook(in)) {
+            // R5-C：公式 cell 用 evaluator 解析缓存计算值（DataFormatter 单独用会输出公式串）
+            org.apache.poi.ss.usermodel.FormulaEvaluator evaluator = workbook.getCreationHelper().createFormulaEvaluator();
             for (int i = 0; i < workbook.getNumberOfSheets(); i++) {
                 Sheet sheet = workbook.getSheetAt(i);
-                String table = sheetToMarkdownTable(sheet);
+                String table = sheetToMarkdownTable(sheet, evaluator);
                 if (table.isEmpty()) {
                     continue;
                 }
@@ -65,7 +67,7 @@ public class XlsxParser implements DocumentParser {
     }
 
     /** 单个 sheet → Markdown 表（含表头分隔行）；全空 sheet 返回空串。 */
-    private String sheetToMarkdownTable(Sheet sheet) {
+    private String sheetToMarkdownTable(Sheet sheet, org.apache.poi.ss.usermodel.FormulaEvaluator evaluator) {
         int firstRow = sheet.getFirstRowNum();
         int lastRow = sheet.getLastRowNum();
         if (firstRow < 0 || (firstRow == 0 && lastRow == 0 && sheet.getRow(0) == null)) {
@@ -80,7 +82,7 @@ public class XlsxParser implements DocumentParser {
             List<String> cells = new ArrayList<>();
             if (row != null) {
                 for (int c = 0; c < row.getLastCellNum(); c++) {
-                    cells.add(cellText(row, c));
+                    cells.add(cellText(row, c, evaluator));
                 }
             }
             maxColumns = Math.max(maxColumns, cells.size());
@@ -130,12 +132,30 @@ public class XlsxParser implements DocumentParser {
         return sb.isEmpty() ? "" : sb.append('\n').toString();
     }
 
-    private String cellText(Row row, int column) {
+    private String cellText(Row row, int column, org.apache.poi.ss.usermodel.FormulaEvaluator evaluator) {
         var cell = row.getCell(column);
         if (cell == null) {
             return "";
         }
-        String text = formatter.formatCellValue(cell);
+        // R5-C §19：公式取计算结果（缓存值），其余类型走 DataFormatter 显示值
+        String text;
+        if (cell.getCellType() == org.apache.poi.ss.usermodel.CellType.FORMULA) {
+            try {
+                // R5-C §19：显式求值（内存生成的 xlsx 无缓存结果值）
+                org.apache.poi.ss.usermodel.CellValue value = evaluator.evaluate(cell);
+                text = value == null ? "" : switch (value.getCellType()) {
+                    case NUMERIC -> formatter.formatRawCellContents(value.getNumberValue(),
+                            cell.getCellStyle().getDataFormat(), cell.getCellStyle().getDataFormatString());
+                    case STRING -> value.getStringValue();
+                    case BOOLEAN -> String.valueOf(value.getBooleanValue());
+                    default -> value.formatAsString();
+                };
+            } catch (Exception e) {
+                text = formatter.formatCellValue(cell); // 求值失败回退公式串
+            }
+        } else {
+            text = formatter.formatCellValue(cell);
+        }
         return text == null ? "" : text.replace('\n', ' ').replace('\r', ' ').strip();
     }
 }
