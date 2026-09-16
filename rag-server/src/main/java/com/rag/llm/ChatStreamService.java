@@ -233,6 +233,7 @@ public class ChatStreamService {
         RetrievalPipeline.RetrievalDiagnostics diag = outcome.diagnostics();
         boolean rerankApplied = diag.rerankApplied();
         Context context = contextAssembler.assemble(passed);
+        com.rag.retrieval.RetrievalTrace trace = outcome.trace();
         long judgeStart = System.currentTimeMillis();
         // R4.1.1：history 必须传给 Judge（解析 FOLLOW_UP 指代），而非只给生成——
         // 历史仅进 Judge 提示词的指代解析区，不构成证据（evidence 仍只来自 context）
@@ -244,7 +245,7 @@ public class ChatStreamService {
             return new AnswerResult(refusalPolicy.refusalAnswer(), List.of(), hits,
                     System.currentTimeMillis() - start, retrievalMs,
                     System.currentTimeMillis() - start - retrievalMs - answerabilityMs, true,
-                    decision, answerabilityMs);
+                    decision, answerabilityMs, trace);
         }
 
         List<ChatMessage> messages = promptAssembler.build(question, history, context);
@@ -286,7 +287,7 @@ public class ChatStreamService {
         long totalMs = System.currentTimeMillis() - start;
         return new AnswerResult(full.toString(), buildCitations(passed), hits, totalMs,
                 retrievalMs, totalMs - retrievalMs - answerabilityMs, false,
-                decision, answerabilityMs);
+                decision, answerabilityMs, trace);
     }
 
     /** 非流式回答聚合结果（eval 复用）。 */
@@ -294,7 +295,17 @@ public class ChatStreamService {
                                List<RetrievalHit> hits, long elapsedMs,
                                long retrievalMs, long generationMs, boolean refusal,
                                com.rag.answerability.AnswerabilityDecision answerability,
-                               long answerabilityMs) {
+                               long answerabilityMs, com.rag.retrieval.RetrievalTrace trace) {
+
+        /** 兼容旧构造（trace = null）。 */
+        public AnswerResult(String answer, List<Map<String, Object>> citations,
+                            List<RetrievalHit> hits, long elapsedMs,
+                            long retrievalMs, long generationMs, boolean refusal,
+                            com.rag.answerability.AnswerabilityDecision answerability,
+                            long answerabilityMs) {
+            this(answer, citations, hits, elapsedMs, retrievalMs, generationMs,
+                    refusal, answerability, answerabilityMs, null);
+        }
     }
 
     /** 问答流命令（controller 请求体映射；约束对齐契约 QAStreamRequest）。 */

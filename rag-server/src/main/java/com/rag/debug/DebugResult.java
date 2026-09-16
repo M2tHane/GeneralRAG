@@ -88,6 +88,28 @@ public final class DebugResult {
     public record DebugRetrievalResult(EffectiveConfig effectiveConfig, List<HitPayload> hits,
                                        Timings timings, ContextPayload context,
                                        AnswerabilityDecisionPayload answerability,
-                                       List<Issue> issues) {
+                                       List<Issue> issues, RetrievalTracePayload trace) {
+    }
+
+    /**
+     * R5-B：分阶段候选轨迹（与 Eval 共用 RetrievalTrace 结构；轻量——
+     * 仅 chunkId/rank/score，无正文）。
+     */
+    public record RetrievalTracePayload(
+            List<StageCandidatePayload> vectorCandidates,
+            List<StageCandidatePayload> bm25Candidates,
+            List<StageCandidatePayload> unionCandidates,
+            List<StageCandidatePayload> fusedCandidates,
+            List<StageCandidatePayload> rerankedCandidates,
+            List<String> finalTopK,
+            List<StageRanksPayload> ranks) {
+
+        public record StageCandidatePayload(String chunkId, int rank, double score) {
+        }
+
+        /** 每 chunk 的跨阶段位次（null = 该阶段未召回）。 */
+        public record StageRanksPayload(String chunkId, Integer vectorRank, Integer bm25Rank,
+                                        Integer rrfRank, Integer rerankRank, Integer finalRank) {
+        }
     }
 }

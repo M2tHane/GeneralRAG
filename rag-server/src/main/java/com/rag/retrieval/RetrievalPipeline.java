@@ -92,12 +92,25 @@ public class RetrievalPipeline {
                         Math.max(topK, candidateLimit));
         long searchMs = System.currentTimeMillis() - searchStart;
 
+        // R5-B：阶段候选轨迹（真实执行路径顺带收集，非第二套 pipeline）
+        List<RetrievalTrace.StageCandidate> vectorCandidates = toCandidates(vectorHits);
+        List<RetrievalTrace.StageCandidate> bm25Candidates = toCandidates(bm25Hits);
+
         // 阶段 3：排序（单通道直接用通道分；混合用 RRF 融合）
+        long fusionStart = System.currentTimeMillis();
         List<RetrievalHit> ordered;
         if (mode == RetrievalMode.VECTOR) {
             ordered = toVectorHits(vectorHits);
         } else {
             ordered = toFusedHits(bm25Hits, vectorHits, topK, candidateLimit);
+        }
+        long fusionMs = System.currentTimeMillis() - fusionStart;
+        List<RetrievalTrace.StageCandidate> fusedCandidates = new ArrayList<>(ordered.size());
+        int fusedRank = 1;
+        for (RetrievalHit h : ordered) {
+            fusedCandidates.add(new RetrievalTrace.StageCandidate(
+                    h.chunk().chunkId(), fusedRank++, h.stages().fusedScore() != null
+                            ? h.stages().fusedScore() : h.score()));
         }
 
         // 阶段 4：KB-9 已删文档有效性过滤（ES 删除为补偿任务异步执行，主档删除即边界收口）
@@ -110,6 +123,8 @@ public class RetrievalPipeline {
         // 阶段 5：重排（仅 HYBRID_RERANK；失败按配置降级并留痕）
         boolean rerankDegraded = false;
         String rerankDegradeReason = null;
+        long rerankStart = System.currentTimeMillis();
+        List<RetrievalTrace.StageCandidate> rerankedCandidates = List.of();
         if (mode == RetrievalMode.HYBRID_RERANK) {
             Reranker.RerankOutcome outcome = reranker.rerank(request.kbId(), request.question(), ordered);
             ordered = outcome.hits();
@@ -119,7 +134,17 @@ public class RetrievalPipeline {
                 throw new DomainException(ErrorCode.RETRIEVAL_FAILED,
                         "重排服务不可用且未启用降级：" + rerankDegradeReason);
             }
+            if (!rerankDegraded) {
+                rerankedCandidates = new ArrayList<>(ordered.size());
+                int rr = 1;
+                for (RetrievalHit h : ordered) {
+                    rerankedCandidates.add(new RetrievalTrace.StageCandidate(
+                            h.chunk().chunkId(), rr++, h.stages().rerankScore() != null
+                                    ? h.stages().rerankScore() : h.score()));
+                }
+            }
         }
+        long rerankMs = System.currentTimeMillis() - rerankStart;
 
         // 重排是否真正参与了打分：以"命中是否带重排位次"为准，而非看谁被装配。
         // 未配置重排服务时装配的是恒等实现，它不改变分数（分数仍是余弦），
@@ -139,9 +164,33 @@ public class RetrievalPipeline {
         }
 
         long totalMs = System.currentTimeMillis() - totalStart;
+        // R5-B：并集候选（chunkId 去重）+ 最终 topK
+        java.util.LinkedHashSet<String> unionIds = new java.util.LinkedHashSet<>();
+        for (RetrievalTrace.StageCandidate c : vectorCandidates) unionIds.add(c.chunkId());
+        for (RetrievalTrace.StageCandidate c : bm25Candidates) unionIds.add(c.chunkId());
+        List<RetrievalTrace.StageCandidate> unionCandidates = new ArrayList<>(unionIds.size());
+        int ur = 1;
+        for (String id : unionIds) {
+            unionCandidates.add(new RetrievalTrace.StageCandidate(id, ur++, 0.0));
+        }
+        List<String> finalTopK = ranked.stream().map(h -> h.chunk().chunkId()).toList();
+        RetrievalTrace trace = new RetrievalTrace(vectorCandidates, bm25Candidates,
+                unionCandidates, fusedCandidates, rerankedCandidates, finalTopK,
+                new RetrievalTrace.StageTiming(embedMs, searchMs, fusionMs, rerankMs, totalMs));
         return new RetrievalOutcome(ranked, new RetrievalDiagnostics(
                 mode, topK, minScore, candidateLimit, cfg.getRrf().getK(),
-                embedMs, searchMs, totalMs, rerankDegraded, rerankDegradeReason, rerankApplied));
+                embedMs, searchMs, totalMs, rerankDegraded, rerankDegradeReason, rerankApplied),
+                trace);
+    }
+
+    /** EsHit 序（即该通道 rank 序）→ 轻量阶段候选。 */
+    private static List<RetrievalTrace.StageCandidate> toCandidates(List<EsHit> hits) {
+        List<RetrievalTrace.StageCandidate> candidates = new ArrayList<>(hits.size());
+        int rank = 1;
+        for (EsHit hit : hits) {
+            candidates.add(new RetrievalTrace.StageCandidate(hit.chunkId(), rank++, hit.score()));
+        }
+        return candidates;
     }
 
     /** VECTOR 模式：直接按 cosine 降序，记录向量位次。 */
@@ -261,11 +310,17 @@ public class RetrievalPipeline {
      * @param hits        命中（分数序、rank 从 1；含未过阈值项）
      * @param diagnostics 生效配置、模式、耗时与降级信息
      */
-    public record RetrievalOutcome(List<RetrievalHit> hits, RetrievalDiagnostics diagnostics) {
+    public record RetrievalOutcome(List<RetrievalHit> hits, RetrievalDiagnostics diagnostics,
+                                   RetrievalTrace trace) {
 
         /** 通过阈值的命中（进入上下文/引用）。 */
         public List<RetrievalHit> passed() {
             return hits.stream().filter(RetrievalHit::passedThreshold).toList();
+        }
+
+        /** 兼容旧调用点（无 trace 需求）。 */
+        public RetrievalOutcome(List<RetrievalHit> hits, RetrievalDiagnostics diagnostics) {
+            this(hits, diagnostics, null);
         }
     }
 

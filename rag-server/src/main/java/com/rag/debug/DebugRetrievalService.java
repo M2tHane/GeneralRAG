@@ -93,7 +93,32 @@ public class DebugRetrievalService {
                 new DebugResult.ContextPayload(context.text(), context.charCount(),
                         context.chunkIds()),
                 toDebugDecision(decision),
-                buildIssues(ranked, context, diag));
+                buildIssues(ranked, context, diag),
+                toTracePayload(outcome.trace()));
+    }
+
+    /** R5-B：RetrievalTrace → Debug 载荷（同一份 trace 结构，Eval/Debug 不两套）。 */
+    private static DebugResult.RetrievalTracePayload toTracePayload(com.rag.retrieval.RetrievalTrace trace) {
+        if (trace == null) {
+            return null;
+        }
+        var map = (java.util.function.Function<com.rag.retrieval.RetrievalTrace.StageCandidate,
+                DebugResult.RetrievalTracePayload.StageCandidatePayload>)
+                c -> new DebugResult.RetrievalTracePayload.StageCandidatePayload(
+                        c.chunkId(), c.rank(), c.score());
+        java.util.List<DebugResult.RetrievalTracePayload.StageRanksPayload> ranks =
+                trace.ranksByChunk().entrySet().stream()
+                        .map(e -> new DebugResult.RetrievalTracePayload.StageRanksPayload(
+                                e.getKey(), e.getValue().vectorRank(), e.getValue().bm25Rank(),
+                                e.getValue().rrfRank(), e.getValue().rerankRank(), e.getValue().finalRank()))
+                        .toList();
+        return new DebugResult.RetrievalTracePayload(
+                trace.vectorCandidates().stream().map(map).toList(),
+                trace.bm25Candidates().stream().map(map).toList(),
+                trace.unionCandidates().stream().map(map).toList(),
+                trace.fusedCandidates().stream().map(map).toList(),
+                trace.rerankedCandidates().stream().map(map).toList(),
+                trace.finalTopK(), ranks);
     }
 
     /** 契约 AnswerabilityDecision 映射（决策关闭时传 null，不虚构判定）。 */

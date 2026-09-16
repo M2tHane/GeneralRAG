@@ -20,6 +20,7 @@ import com.rag.domain.enums.SessionRole;
 import com.rag.llm.ChatStreamService;
 import com.rag.llm.PromptAssembler;
 import com.rag.retrieval.RetrievalService;
+import com.rag.retrieval.RetrievalTrace;
 import com.rag.retrieval.model.RetrievalHit;
 import com.rag.retrieval.model.RetrievalStages;
 import com.rag.storage.es.EsHit;
@@ -189,6 +190,8 @@ public class EvalRunExecutor {
         // 一次 Judge 调用尝试，不能从分母里消失。
         int executedCount = 0;
         int evaluatedCount = 0;
+        // R5-B：stage-level 召回/重排统计（口径见 StageMetrics）
+        StageMetrics.Aggregate stageAgg = new StageMetrics.Aggregate();
         // R4.1.2：attempted = 实际进入执行循环（明细行存在）的题数；
         // 关系链 attempted ≥ executed ≥ evaluated
         int attemptedCount = 0;
@@ -234,12 +237,29 @@ public class EvalRunExecutor {
                 executionFailed = true;
             }
             int latencyMs = (int) (System.currentTimeMillis() - start);
+            com.rag.retrieval.RetrievalTrace trace = answer == null ? null : answer.trace();
 
             List<EsHit> orderedHits = new java.util.ArrayList<>(hits.size());
             for (RetrievalHit hit : hits) {
                 orderedHits.add(hit.chunk());
             }
             List<Map<String, Object>> retrieved = buildRetrieved(hits, docNameCache, documentRepository);
+            // R5-B：retrieved 快照补 per-item stage 位次（BadCase 下钻：vector/bm25/rrf/rerank/final）
+            if (trace != null) {
+                Map<String, RetrievalTrace.StageRanks> ranksByChunk = trace.ranksByChunk();
+                for (Map<String, Object> evalHitRow : retrieved) {
+                    RetrievalTrace.StageRanks r = ranksByChunk.get(evalHitRow.get("chunkId"));
+                    if (r != null) {
+                        Map<String, Object> ranks = new java.util.HashMap<>();
+                        ranks.put("vector", r.vectorRank());
+                        ranks.put("bm25", r.bm25Rank());
+                        ranks.put("rrf", r.rrfRank());
+                        ranks.put("rerank", r.rerankRank());
+                        ranks.put("final", r.finalRank());
+                        evalHitRow.put("stageRanks", ranks);
+                    }
+                }
+            }
 
             // hit 判定（R2-E1 分块级）：answerable=false 或执行失败一律 NULL
             Boolean hit = null;
@@ -353,6 +373,22 @@ public class EvalRunExecutor {
                     }
                 }
             }
+            // R5-B：stage 召回/重排判定（answerable 且执行成功才参与）
+            if (item.isAnswerable() && !executionFailed && answer != null && trace != null) {
+                Map<String, EsHit> hitsById = new java.util.LinkedHashMap<>();
+                for (RetrievalTrace.StageCandidate c : trace.unionCandidates()) {
+                    for (RetrievalHit candidate : hits) {
+                        if (candidate.chunk().chunkId().equals(c.chunkId())) {
+                            hitsById.put(c.chunkId(), candidate.chunk());
+                            break;
+                        }
+                    }
+                }
+                List<Map<String, Object>> evidenceList = item.getEvidence() == null
+                        ? List.of() : item.getEvidence();
+                stageAgg.add(StageMetrics.evaluateItem(evidenceList, trace, hitsById));
+            }
+
             runItemRepository.save(runItem);
 
             // R4.1.2：延迟统计只收"成功执行的题"——executionFailed 的耗时（通常是一次
@@ -389,6 +425,8 @@ public class EvalRunExecutor {
         // 在 degraded 出现时会与数据集标签集合不一致）
         metrics.put("outOfKbCount", outOfKbCount);
         // R4.1.1：执行/判定分母分离（口径见 executeItems 注释）
+        // R5-B：stage-level retrieval metrics
+        metrics.put("stageRetrieval", stageAgg.toMap());
         // R4.1.2：attemptedCount = 进入执行循环的题数；链路 attempted ≥ executed ≥ evaluated
         metrics.put("attemptedCount", attemptedCount);
         metrics.put("executedCount", executedCount);
