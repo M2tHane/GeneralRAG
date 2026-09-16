@@ -10,6 +10,8 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import com.rag.domain.enums.EvalCategory;
+import com.rag.domain.enums.EvalEvidenceMode;
+import com.rag.domain.enums.EvalFailureMode;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -68,6 +70,34 @@ public class EvalDatasetItemEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "category", nullable = false, length = 20)
     private EvalCategory category;
+
+    /**
+     * R6-A：负例（answerable=false）失败机理；正例必须为 null。
+     * 诊断负例时按机理分组统计 FAR，比整体 FAR 更能定位优化层。
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "failure_mode", length = 32)
+    private EvalFailureMode failureMode;
+
+    /**
+     * R6-A：正例证据形态（SINGLE_CHUNK / MULTI_CHUNK / FOLLOW_UP）；负例必须为 null。
+     * MULTI_CHUNK 驱动 Evidence Coverage 指标；FOLLOW_UP 表示 history 仅用于指代解析。
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "evidence_mode", length = 20)
+    private EvalEvidenceMode evidenceMode;
+
+    /**
+     * R6-A：负例诱导性证据（结构同 evidence，EvidenceRef[]）——最容易让系统
+     * 误答的相关 chunk 锚点，用于 FP 归因；仅负例可用。
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "tempting_evidence", columnDefinition = "json")
+    private List<Map<String, Object>> temptingEvidence;
+
+    /** R6-A：负例缺失的关键条件说明（人工可读）；仅负例可用。 */
+    @Column(name = "missing_requirement", length = 500)
+    private String missingRequirement;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false, columnDefinition = "datetime(3)")
@@ -150,6 +180,38 @@ public class EvalDatasetItemEntity {
 
     public void setCategory(EvalCategory category) {
         this.category = category;
+    }
+
+    public EvalFailureMode getFailureMode() {
+        return failureMode;
+    }
+
+    public void setFailureMode(EvalFailureMode failureMode) {
+        this.failureMode = failureMode;
+    }
+
+    public EvalEvidenceMode getEvidenceMode() {
+        return evidenceMode;
+    }
+
+    public void setEvidenceMode(EvalEvidenceMode evidenceMode) {
+        this.evidenceMode = evidenceMode;
+    }
+
+    public List<Map<String, Object>> getTemptingEvidence() {
+        return temptingEvidence;
+    }
+
+    public void setTemptingEvidence(List<Map<String, Object>> temptingEvidence) {
+        this.temptingEvidence = temptingEvidence;
+    }
+
+    public String getMissingRequirement() {
+        return missingRequirement;
+    }
+
+    public void setMissingRequirement(String missingRequirement) {
+        this.missingRequirement = missingRequirement;
     }
 
     public LocalDateTime getCreatedAt() {

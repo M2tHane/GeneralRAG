@@ -32,7 +32,8 @@ class DatasetFileParserTest {
                   {"question":"支付回调超时是多少？","referenceAnswer":"5 秒",
                    "answerable":true,"category":"DIRECT",
                    "evidence":[{"docName":"支付接口文档.md","titlePath":"支付 > 回调","page":3,"snippet":"..."}]},
-                  {"question":"Q2","category":"OUT_OF_KB","answerable":false,"evidence":[]}
+                  {"question":"Q2","category":"OUT_OF_KB","answerable":false,
+                   "failureMode":"OUT_OF_KB","evidence":[]}
                 ]
                 """;
         List<DatasetFileParser.EvalItem> items = parser.parse("ds.json", bytes(json));
@@ -53,9 +54,9 @@ class DatasetFileParserTest {
     @Test
     void parseCsvHappyPath() {
         String csv = """
-                question,referenceAnswer,answerable,category,evidence
-                "CSV 问题一","CSV 参考答案",true,DIRECT,"[{""docName"":""a.md"",""titlePath"":""A > B""}]"
-                "CSV 问题二",,false,OUT_OF_KB,"[]"
+                question,referenceAnswer,answerable,category,failureMode,evidence
+                "CSV 问题一","CSV 参考答案",true,DIRECT,,"[{""docName"":""a.md"",""titlePath"":""A > B""}]"
+                "CSV 问题二",,false,OUT_OF_KB,OUT_OF_KB,"[]"
                 """;
         List<DatasetFileParser.EvalItem> items = parser.parse("ds.csv", bytes(csv));
         assertThat(items).hasSize(2);
@@ -241,6 +242,131 @@ class DatasetFileParserTest {
                 .isInstanceOfSatisfying(DomainException.class, e -> {
                     assertThat(e.getCode()).isEqualTo(ErrorCode.INVALID_DATASET_FILE);
                     assertThat(e.getMessage()).contains("history 必须是数组");
+                });
+    }
+
+    // ---------- R6-A：Hard Eval 最小标签集 ----------
+
+    @Test
+    void parsesHardEvalLabels() {
+        String json = """
+                [
+                  {"question":"AOF 每秒刷盘最多丢多少数据？","category":"DIRECT","answerable":true,
+                   "evidenceMode":"SINGLE_CHUNK",
+                   "evidence":[{"docName":"redis.md","contentHash":"b17e5488dd0f38e4"}]},
+                  {"question":"Nginx 默认最大并发连接数是多少？","category":"PARTIAL_EVIDENCE","answerable":false,
+                   "failureMode":"PARTIAL_EVIDENCE",
+                   "missingRequirement":"语料只有 worker_connections，缺 worker_processes，不能推出总并发",
+                   "temptingEvidence":[{"docName":"nginx.md","titlePath":"nginx.md > 1.2. 相关指令"}]}
+                ]""";
+        List<DatasetFileParser.EvalItem> items = parser.parse("hard.json", bytes(json));
+        assertThat(items).hasSize(2);
+        // 正例：evidenceMode 保留
+        assertThat(items.get(0).evidenceMode()).isEqualTo(com.rag.domain.enums.EvalEvidenceMode.SINGLE_CHUNK);
+        assertThat(items.get(0).failureMode()).isNull();
+        assertThat(items.get(0).temptingEvidence()).isEmpty();
+        assertThat(items.get(0).missingRequirement()).isNull();
+        // 负例：failureMode + 诊断信息保留
+        assertThat(items.get(1).failureMode()).isEqualTo(com.rag.domain.enums.EvalFailureMode.PARTIAL_EVIDENCE);
+        assertThat(items.get(1).evidenceMode()).isNull();
+        assertThat(items.get(1).missingRequirement()).contains("worker_processes");
+        assertThat(items.get(1).temptingEvidence()).hasSize(1);
+    }
+
+    @Test
+    void csvParsesHardEvalColumns() {
+        String csv = """
+                question,answerable,category,evidenceMode,failureMode,temptingEvidence,missingRequirement
+                "默认端口是多少？",true,DIRECT,SINGLE_CHUNK,,"[]",""
+                "最大并发是多少？",false,CONFUSABLE,,PARTIAL_EVIDENCE,"[{""contentHash"":""abc123""}]","缺 worker_processes"
+                """;
+        List<DatasetFileParser.EvalItem> items = parser.parse("hard.csv", bytes(csv));
+        assertThat(items).hasSize(2);
+        assertThat(items.get(0).evidenceMode()).isEqualTo(com.rag.domain.enums.EvalEvidenceMode.SINGLE_CHUNK);
+        assertThat(items.get(0).failureMode()).isNull();
+        assertThat(items.get(1).failureMode()).isEqualTo(com.rag.domain.enums.EvalFailureMode.PARTIAL_EVIDENCE);
+        assertThat(items.get(1).temptingEvidence()).hasSize(1);
+        assertThat(items.get(1).missingRequirement()).isEqualTo("缺 worker_processes");
+    }
+
+    @Test
+    void positiveItemWithFailureModeRejected() {
+        String json = """
+                [{"question":"q","category":"DIRECT","answerable":true,"failureMode":"OUT_OF_KB"}]""";
+        assertThatThrownBy(() -> parser.parse("ds.json", bytes(json)))
+                .isInstanceOfSatisfying(DomainException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(ErrorCode.INVALID_DATASET_FILE);
+                    assertThat(e.getMessage()).contains("failureMode");
+                });
+    }
+
+    @Test
+    void negativeItemWithoutFailureModeRejected() {
+        String json = """
+                [{"question":"q","category":"OUT_OF_KB","answerable":false}]""";
+        assertThatThrownBy(() -> parser.parse("ds.json", bytes(json)))
+                .isInstanceOfSatisfying(DomainException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(ErrorCode.INVALID_DATASET_FILE);
+                    assertThat(e.getMessage()).contains("failureMode 必填");
+                });
+    }
+
+    @Test
+    void negativeItemWithEvidenceModeRejected() {
+        String json = """
+                [{"question":"q","category":"OUT_OF_KB","answerable":false,
+                  "failureMode":"OUT_OF_KB","evidenceMode":"SINGLE_CHUNK"}]""";
+        assertThatThrownBy(() -> parser.parse("ds.json", bytes(json)))
+                .isInstanceOfSatisfying(DomainException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(ErrorCode.INVALID_DATASET_FILE);
+                    assertThat(e.getMessage()).contains("evidenceMode");
+                });
+    }
+
+    @Test
+    void positiveItemWithDiagnosticFieldsRejected() {
+        String json = """
+                [{"question":"q","category":"DIRECT","answerable":true,
+                  "missingRequirement":"不应该出现"}]""";
+        assertThatThrownBy(() -> parser.parse("ds.json", bytes(json)))
+                .isInstanceOfSatisfying(DomainException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(ErrorCode.INVALID_DATASET_FILE);
+                    assertThat(e.getMessage()).contains("仅用于 answerable=false");
+                });
+    }
+
+    @Test
+    void temptingEvidenceWithoutAnchorRejected() {
+        String json = """
+                [{"question":"q","category":"CONFUSABLE","answerable":false,
+                  "failureMode":"ENTITY_MISMATCH",
+                  "temptingEvidence":[{"docName":"x.md"}]}]""";
+        assertThatThrownBy(() -> parser.parse("ds.json", bytes(json)))
+                .isInstanceOfSatisfying(DomainException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(ErrorCode.INVALID_DATASET_FILE);
+                    assertThat(e.getMessage()).contains("temptingEvidence");
+                });
+    }
+
+    @Test
+    void illegalFailureModeRejected() {
+        String json = """
+                [{"question":"q","category":"OUT_OF_KB","answerable":false,"failureMode":"SOMETHING_ELSE"}]""";
+        assertThatThrownBy(() -> parser.parse("ds.json", bytes(json)))
+                .isInstanceOfSatisfying(DomainException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(ErrorCode.INVALID_DATASET_FILE);
+                    assertThat(e.getMessage()).contains("failureMode");
+                });
+    }
+
+    @Test
+    void illegalEvidenceModeRejected() {
+        String json = """
+                [{"question":"q","category":"DIRECT","answerable":true,"evidenceMode":"TEN_CHUNKS"}]""";
+        assertThatThrownBy(() -> parser.parse("ds.json", bytes(json)))
+                .isInstanceOfSatisfying(DomainException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(ErrorCode.INVALID_DATASET_FILE);
+                    assertThat(e.getMessage()).contains("evidenceMode");
                 });
     }
 }

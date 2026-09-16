@@ -138,9 +138,9 @@ class EvalFlowIT {
         String json1 = """
                 [
                   {"question":"支付回调确认超时是多少？","referenceAnswer":"5 秒",
-                   "answerable":true,"category":"DIRECT",
+                   "answerable":true,"category":"DIRECT","evidenceMode":"SINGLE_CHUNK",
                    "evidence":[{"docName":"%s","titlePath":"%s"}]},
-                  {"question":"知识库里完全没有的话题问题？","answerable":false,"category":"OUT_OF_KB","evidence":[]}
+                  {"question":"知识库里完全没有的话题问题？","answerable":false,"category":"OUT_OF_KB","failureMode":"OUT_OF_KB","evidence":[]}
                 ]
                 """.formatted(DOC_NAME, DOC_TITLE_PATH);
         datasetV1 = evalService.importDataset(multipartFile(json1, "评测集.json"), datasetName, DatasetType.TUNING);
@@ -168,6 +168,11 @@ class EvalFlowIT {
     @Order(3)
     void runCompletesWithMetricsAndConfigSnapshot() {
         fakeModel.setChatAnswer("依据文档，支付回调确认超时为 5 秒。");
+        // R6-A：显式 stub Judge 合法 JSON——此前 Judge 收到非 JSON 文案必然
+        // JUDGE_DEGRADED，两题全部退出混淆矩阵/分组指标（evaluated=0），
+        // failureMode/evidenceMode 分组无从验证
+        fakeModel.setNonStreamAnswer("{\"answerable\": true, \"confidence\": 0.9, \"reason\": \"ok\"}");
+        fakeModel.setNonStreamFailure(false);
         // 显式指定版本 1（2 个样本；若不传 versionId，契约语义是"最新版本"=v2）
         EvalRunEntity run = evalService.createRun(UUID.fromString(datasetV1.id()),
                 UUID.fromString(datasetV1.latestVersion().versionId()),
@@ -199,6 +204,30 @@ class EvalFlowIT {
         assertThat(((Number) metrics.get("hitAt3")).doubleValue()).isEqualTo(1.0);
         assertThat(((Number) metrics.get("hitAt5")).doubleValue()).isEqualTo(1.0);
         assertThat(((Number) metrics.get("avgLatencyMs")).doubleValue()).isGreaterThanOrEqualTo(0);
+
+        // R6-A：新增指标键存在；SINGLE_CHUNK 正例进 evidenceMode 分组，coverage=1.0
+        assertThat(metrics).containsKeys("evidenceCoverageAvg", "fullEvidenceCoverageRate",
+                "failureModeBreakdown", "evidenceModeBreakdown");
+        assertThat(((Number) metrics.get("evidenceCoverageAvg")).doubleValue()).isEqualTo(1.0);
+        assertThat(((Number) metrics.get("fullEvidenceCoverageRate")).doubleValue()).isEqualTo(1.0);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> fmb = (Map<String, Object>) metrics.get("failureModeBreakdown");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> outOfKbRow = (Map<String, Object>) fmb.get("OUT_OF_KB");
+        assertThat(outOfKbRow).isNotNull();
+        assertThat(((Number) outOfKbRow.get("count")).intValue()).isEqualTo(1);
+        // FakeOpenAiServer 生成的回答内容为固定文案，Answerability 判决走 fake 决策——
+        // 此处不断言 far 方向（由混淆矩阵测试覆盖），只断言组内计数自洽
+        int answered = ((Number) outOfKbRow.get("answered")).intValue();
+        int refusedCnt = ((Number) outOfKbRow.get("refused")).intValue();
+        assertThat(answered + refusedCnt).isEqualTo(1);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> emb = (Map<String, Object>) metrics.get("evidenceModeBreakdown");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> singleRow = (Map<String, Object>) emb.get("SINGLE_CHUNK");
+        assertThat(singleRow).isNotNull();
+        assertThat(((Number) singleRow.get("count")).intValue()).isEqualTo(1);
+        assertThat(((Number) singleRow.get("hitAt1")).doubleValue()).isEqualTo(1.0);
 
         // 明细：可回答题 hit=true + retrieved 快照 + 回答与引用；OUT_OF_KB 题 hit=null
         EvalRunViewService.ItemPage items = runViewService.listItems(finished, 1, 20);
@@ -284,9 +313,9 @@ class EvalFlowIT {
         String json = """
                 [
                   {"question":"支付回调确认超时是多少？","referenceAnswer":"5 秒",
-                   "answerable":true,"category":"DIRECT",
+                   "answerable":true,"category":"DIRECT","evidenceMode":"SINGLE_CHUNK",
                    "evidence":[{"docName":"%s","titlePath":"%s"}]},
-                  {"question":"知识库里完全没有的话题问题？","answerable":false,"category":"OUT_OF_KB","evidence":[]}
+                  {"question":"知识库里完全没有的话题问题？","answerable":false,"category":"OUT_OF_KB","failureMode":"OUT_OF_KB","evidence":[]}
                 ]
                 """.formatted(DOC_NAME, DOC_TITLE_PATH);
         EvalService.EvalDatasetView ds = evalService.importDataset(
@@ -351,7 +380,7 @@ class EvalFlowIT {
         String historyJson = """
                 [
                   {"question":"那这个触发以后怎么解除？","referenceAnswer":"调整水位后等待自动解除，或手动放开只读块",
-                   "answerable":true,"category":"FOLLOW_UP",
+                   "answerable":true,"category":"FOLLOW_UP","evidenceMode":"FOLLOW_UP",
                    "history":[
                      {"role":"user","content":"ES 洪泛水位是什么？"},
                      {"role":"assistant","content":"洪泛水位是磁盘使用率达到 90%% 时把索引标记为只读的机制。"}
@@ -417,7 +446,7 @@ class EvalFlowIT {
         String json = """
                 [
                   {"question":"支付回调确认超时是多少？","referenceAnswer":"5 秒",
-                   "answerable":true,"category":"DIRECT",
+                   "answerable":true,"category":"DIRECT","evidenceMode":"SINGLE_CHUNK",
                    "evidence":[{"docName":"%s","titlePath":"%s"}]},
                   {"question":"签名算法是什么？","referenceAnswer":"HMAC-SHA256",
                    "answerable":true,"category":"TERM_VARIATION",

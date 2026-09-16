@@ -134,6 +134,12 @@ public class EvalService {
             entity.setHistory(item.history() == null || item.history().isEmpty() ? null : item.history());
             entity.setAnswerable(item.answerable());
             entity.setCategory(item.category());
+            // R6-A：Hard Eval 最小标签集（解析器已做一致性校验，此处仅透传）
+            entity.setFailureMode(item.failureMode());
+            entity.setEvidenceMode(item.evidenceMode());
+            entity.setTemptingEvidence(item.temptingEvidence() == null
+                    || item.temptingEvidence().isEmpty() ? null : item.temptingEvidence());
+            entity.setMissingRequirement(item.missingRequirement());
             entities.add(entity);
         }
         itemRepository.saveAll(entities);

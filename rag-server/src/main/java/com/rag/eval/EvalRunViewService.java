@@ -93,6 +93,14 @@ public class EvalRunViewService {
         view.put("referenceAnswer", datasetItem == null ? null : datasetItem.getReferenceAnswer());
         view.put("answerable", datasetItem != null && datasetItem.isAnswerable());
         view.put("category", datasetItem == null ? null : datasetItem.getCategory().name());
+        // R6-A：Hard Eval 标签（datasetItem 提供表未冗余的负例机理/证据形态/诊断信息）
+        view.put("failureMode", datasetItem == null || datasetItem.getFailureMode() == null
+                ? null : datasetItem.getFailureMode().name());
+        view.put("evidenceMode", datasetItem == null || datasetItem.getEvidenceMode() == null
+                ? null : datasetItem.getEvidenceMode().name());
+        view.put("temptingEvidence", datasetItem == null ? null : datasetItem.getTemptingEvidence());
+        view.put("missingRequirement", datasetItem == null ? null : datasetItem.getMissingRequirement());
+        view.put("evidence", datasetItem == null ? null : datasetItem.getEvidence());
         view.put("retrieved", item.getRetrieved());
         view.put("generatedAnswer", item.getGeneratedAnswer());
         view.put("citations", item.getCitations());

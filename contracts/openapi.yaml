@@ -601,7 +601,13 @@ paths:
         R4.1 起支持——FOLLOW_UP 类样本提供会话历史以解析指代；历史仅用于理解当前问题，
         不构成回答证据，检索仍只使用当前问题）、answerable（是否可回答）、category
         （DIRECT/TERM_VARIATION/FOLLOW_UP/OUT_OF_KB/CONFUSABLE/PARTIAL_EVIDENCE）。
-        JSON 文件为对象数组；CSV 表头须与字段同名（evidence/history 列为 JSON 字符串）。
+        R6-A（Hard Eval）可选字段：failureMode（负例失败机理，EvalFailureMode；
+        answerable=true 时禁止设置，answerable=false 时必填）、evidenceMode（正例证据形态，
+        EvalEvidenceMode；answerable=false 时禁止设置）、temptingEvidence（负例诱导性证据，
+        EvidenceRef[] 结构）、missingRequirement（负例缺失条件说明，≤500 字符；
+        temptingEvidence/missingRequirement 仅负例可用）。违反一致性校验的样本整文件
+        以 422 拒绝导入，不做静默修正。
+        JSON 文件为对象数组；CSV 表头须与字段同名（evidence/history/temptingEvidence 列为 JSON 字符串）。
       requestBody:
         required: true
         content:
@@ -1354,6 +1360,24 @@ components:
         PARTIAL_EVIDENCE（R4 Answerability 轮新增）：语料只覆盖问题要求的部分答案
         （如问 A/B/C 三方案优缺点而语料只有 A/B），即使检索高度相关，
         expected answerable=false——证据不足以完整回答。
+    EvalFailureMode:
+      type: string
+      nullable: true
+      enum: [OUT_OF_KB, PARTIAL_EVIDENCE, MISSING_CONDITION, ENTITY_MISMATCH,
+             SCOPE_MISMATCH, NUMERIC_MISMATCH, VERSION_CONFLICT, UNSUPPORTED_INFERENCE]
+      description: |
+        R6-A：负例（answerable=false）失败机理。诊断负例时按机理分组统计 FAR，
+        比整体 FAR 更能定位应该优化哪一层。answerable=true 的样本必须为 null，
+        两个字段不允许矛盾状态（导入校验拒绝）。
+    EvalEvidenceMode:
+      type: string
+      nullable: true
+      enum: [SINGLE_CHUNK, MULTI_CHUNK, FOLLOW_UP]
+      description: |
+        R6-A：正例（answerable=true）证据形态。SINGLE_CHUNK=一块证据足够；
+        MULTI_CHUNK=多块 required evidence 必须共同覆盖（附加 Evidence Coverage 指标）；
+        FOLLOW_UP=当前问题依赖 history 做指代解析（history 只用于解析指代，不构成证据）。
+        answerable=false 的样本必须为 null。
     EvidenceRef:
       type: object
       properties:
@@ -1430,6 +1454,31 @@ components:
           type: number
           nullable: true
           description: R2-E2 MRR = 每题首个命中证据分块排名倒数的平均值（未召回计 0）
+        evidenceCoverageAvg:
+          type: number
+          nullable: true
+          description: |
+            R6-A Evidence Coverage 均值：逐题（召回的 required evidence 数 / 该题
+            required evidence 总数）后跨题平均。与 recallAt5（证据 chunk 总数口径）
+            并存；Hit@K 定义不变，本指标为新增诊断口径，回答"多块证据被完整召回的程度"。
+        fullEvidenceCoverageRate:
+          type: number
+          nullable: true
+          description: R6-A coverage==1.0（required evidence 全部命中）的题占 answerable 题比例。
+        failureModeBreakdown:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: |
+            R6-A 负例按 failureMode 分组：每类 {count, answered(FP), refused(TN), far}。
+            far = FP/(FP+TN)，样本级口径与整体混淆矩阵同源。比整体 FAR 更能定位该优化哪一层。
+        evidenceModeBreakdown:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: |
+            R6-A 正例按 evidenceMode 分组：每类 {count, hitAt1/3/5, mrr,
+            evidenceCoverageAvg, fullEvidenceCoverageRate, refused, frr}。
         refusalAccuracy:
           type: number
           nullable: true
@@ -1551,6 +1600,26 @@ components:
         referenceAnswer: { type: string, nullable: true }
         answerable: { type: boolean }
         category: { $ref: "#/components/schemas/EvalCategory" }
+        failureMode:
+          $ref: "#/components/schemas/EvalFailureMode"
+          description: R6-A 负例失败机理（来自数据集标签；正例为 null）
+        evidenceMode:
+          $ref: "#/components/schemas/EvalEvidenceMode"
+          description: R6-A 正例证据形态（来自数据集标签；负例为 null）
+        temptingEvidence:
+          type: array
+          nullable: true
+          description: R6-A 负例诱导性证据（EvidenceRef[] 结构；正例为 null）
+          items: { type: object, additionalProperties: true }
+        missingRequirement:
+          type: string
+          nullable: true
+          description: R6-A 负例缺失的关键条件说明；正例为 null
+        evidence:
+          type: array
+          nullable: true
+          description: 参考证据原文（EvidenceRef[]，与数据集标签同源；供 BadCase 对照）
+          items: { type: object, additionalProperties: true }
         retrieved:
           type: array
           description: 本次运行的检索命中（快照）

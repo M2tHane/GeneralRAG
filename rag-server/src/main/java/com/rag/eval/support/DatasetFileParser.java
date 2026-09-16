@@ -12,6 +12,8 @@ import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rag.domain.enums.EvalCategory;
+import com.rag.domain.enums.EvalEvidenceMode;
+import com.rag.domain.enums.EvalFailureMode;
 import com.rag.domain.exception.DomainException;
 import com.rag.domain.exception.ErrorCode;
 import org.springframework.stereotype.Component;
@@ -24,9 +26,11 @@ import org.springframework.web.multipart.MultipartFile;
  * <ul>
  *   <li>{@code .json}：顶层对象数组，元素字段 question（必填）、referenceAnswer、
  *       answerable（boolean，缺省 true）、category（EvalCategory，必填合法值）、
- *       evidence（EvidenceRef[]，可缺省为 []）；</li>
+ *       evidence（EvidenceRef[]，可缺省为 []）；R6-A 可选：failureMode / evidenceMode /
+ *       temptingEvidence / missingRequirement（Hard Eval 标签，带一致性校验）；</li>
  *   <li>{@code .csv}：表头须含 question/answerable/category（同名字段），
- *       evidence/history 列为 JSON 字符串数组（如 {@code [{"docName":"...","titlePath":"..."}]}）。
+ *       evidence/history/temptingEvidence 列为 JSON 字符串数组
+ *       （如 {@code [{"docName":"...","titlePath":"..."}]}）。
  *       可选 history（R4.1）：[{role: user|assistant, content}] 时间正序，仅用于解析当前问题指代。</li>
  * </ul>
  *
@@ -38,11 +42,24 @@ public class DatasetFileParser {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    /** 解析产物（纯结构，与 JPA 实体解耦）。history 为可选对话历史（R4.1 FOLLOW_UP 口径）。 */
+    /** 解析产物（纯结构，与 JPA 实体解耦）。history 为可选对话历史（R4.1 FOLLOW_UP 口径）。
+     *  R6-A 新增：failureMode/evidenceMode（Hard Eval 最小标签集）+ temptingEvidence/missingRequirement（负例诊断信息）。 */
     public record EvalItem(String question, String referenceAnswer,
                            List<Map<String, Object>> evidence,
                            List<Map<String, Object>> history,
-                           boolean answerable, EvalCategory category) {
+                           boolean answerable, EvalCategory category,
+                           EvalFailureMode failureMode, EvalEvidenceMode evidenceMode,
+                           List<Map<String, Object>> temptingEvidence,
+                           String missingRequirement) {
+
+        /** 旧调用兼容（R6-A 之前的行为：无 Hard Eval 标签）。 */
+        public EvalItem(String question, String referenceAnswer,
+                        List<Map<String, Object>> evidence,
+                        List<Map<String, Object>> history,
+                        boolean answerable, EvalCategory category) {
+            this(question, referenceAnswer, evidence, history, answerable, category,
+                    null, null, null, null);
+        }
     }
 
     /**
@@ -123,6 +140,13 @@ public class DatasetFileParser {
             // 原样透传，布尔合法性（true/false，大小写不敏感）由 toItem 统一校验
             record.put("answerable", cell(row, col.get("answerable")));
             record.put("category", cell(row, col.get("category")));
+            // R6-A：Hard Eval 可选列（原样透传，合法性由 toItem 统一校验）
+            record.put("failureMode", col.containsKey("failureMode")
+                    ? cell(row, col.get("failureMode")) : null);
+            record.put("evidenceMode", col.containsKey("evidenceMode")
+                    ? cell(row, col.get("evidenceMode")) : null);
+            record.put("missingRequirement", col.containsKey("missingRequirement")
+                    ? cell(row, col.get("missingRequirement")) : null);
             String evidenceJson = col.containsKey("evidence") ? cell(row, col.get("evidence")) : "[]";
             List<Map<String, Object>> evidence;
             try {
@@ -134,6 +158,19 @@ public class DatasetFileParser {
                         + e.getMessage());
             }
             record.put("evidence", evidence);
+            // R6-A：temptingEvidence 列同样为 JSON 字符串数组（仅负例诊断用）
+            if (col.containsKey("temptingEvidence")) {
+                String temptingJson = cell(row, col.get("temptingEvidence"));
+                if (temptingJson != null && !temptingJson.isBlank()) {
+                    try {
+                        record.put("temptingEvidence", JSON.readValue(temptingJson,
+                                JSON.getTypeFactory().constructCollectionType(List.class, Map.class)));
+                    } catch (IOException e) {
+                        throw invalid("CSV 第 " + lineNo + " 行 temptingEvidence 列不是合法的 JSON 数组："
+                                + e.getMessage());
+                    }
+                }
+            }
             items.add(toItem(record, "CSV 第 " + lineNo + " 行"));
         }
         return items;
@@ -237,7 +274,69 @@ public class DatasetFileParser {
         String referenceAnswer = reference == null || String.valueOf(reference).isBlank()
                 ? null : String.valueOf(reference);
         List<Map<String, Object>> history = toHistory(row.get("history"), location);
-        return new EvalItem(q.trim(), referenceAnswer, evidence, history, answerable, category);
+
+        // ---------------- R6-A：Hard Eval 最小标签集 ----------------
+        EvalFailureMode failureMode = null;
+        Object rawFailureMode = row.get("failureMode");
+        if (rawFailureMode != null && !String.valueOf(rawFailureMode).isBlank()) {
+            try {
+                failureMode = EvalFailureMode.valueOf(String.valueOf(rawFailureMode));
+            } catch (IllegalArgumentException e) {
+                throw invalid(location + "：非法 failureMode '" + rawFailureMode
+                        + "'（合法值：OUT_OF_KB/PARTIAL_EVIDENCE/MISSING_CONDITION/ENTITY_MISMATCH/"
+                        + "SCOPE_MISMATCH/NUMERIC_MISMATCH/VERSION_CONFLICT/UNSUPPORTED_INFERENCE）");
+            }
+        }
+        EvalEvidenceMode evidenceMode = null;
+        Object rawEvidenceMode = row.get("evidenceMode");
+        if (rawEvidenceMode != null && !String.valueOf(rawEvidenceMode).isBlank()) {
+            try {
+                evidenceMode = EvalEvidenceMode.valueOf(String.valueOf(rawEvidenceMode));
+            } catch (IllegalArgumentException e) {
+                throw invalid(location + "：非法 evidenceMode '" + rawEvidenceMode
+                        + "'（合法值：SINGLE_CHUNK/MULTI_CHUNK/FOLLOW_UP）");
+            }
+        }
+        List<Map<String, Object>> temptingEvidence = toEvidence(row.get("temptingEvidence"), location);
+        Object rawMissing = row.get("missingRequirement");
+        String missingRequirement = rawMissing == null || String.valueOf(rawMissing).isBlank()
+                ? null : String.valueOf(rawMissing);
+
+        // 一致性校验（R6-A §12）：answerable 与 failureMode/evidenceMode 不允许矛盾状态。
+        // 只允许双 null 或一一对应，错误样本直接拒绝导入，不静默修正标签。
+        if (answerable && failureMode != null) {
+            throw invalid(location + "：answerable=true 时不得设置 failureMode（当前："
+                    + failureMode + "）");
+        }
+        if (!answerable && evidenceMode != null) {
+            throw invalid(location + "：answerable=false 时不得设置 evidenceMode（当前："
+                    + evidenceMode + "）");
+        }
+        if (!answerable && failureMode == null) {
+            throw invalid(location + "：answerable=false 时 failureMode 必填"
+                    + "（OUT_OF_KB/PARTIAL_EVIDENCE/MISSING_CONDITION/ENTITY_MISMATCH/SCOPE_MISMATCH/"
+                    + "NUMERIC_MISMATCH/VERSION_CONFLICT/UNSUPPORTED_INFERENCE）");
+        }
+        if (!answerable && temptingEvidence != null && !temptingEvidence.isEmpty()
+                && !hasAnyAnchor(temptingEvidence)) {
+            throw invalid(location + "：temptingEvidence 每条都必须含分块级锚点"
+                    + "（contentHash/chunkId/titlePath/anchorPath 之一）");
+        }
+        if (answerable && (temptingEvidence != null && !temptingEvidence.isEmpty()
+                || missingRequirement != null)) {
+            throw invalid(location + "：temptingEvidence/missingRequirement 仅用于 answerable=false 的负例");
+        }
+
+        return new EvalItem(q.trim(), referenceAnswer, evidence, history, answerable, category,
+                failureMode, evidenceMode, temptingEvidence, missingRequirement);
+    }
+
+    /** 是否存在至少一条带分块级锚点的证据（R6-A temptingEvidence 校验用）。 */
+    private static boolean hasAnyAnchor(List<Map<String, Object>> evidenceList) {
+        return evidenceList.stream().anyMatch(ev -> ev.get("contentHash") != null
+                || ev.get("chunkId") != null
+                || ev.get("titlePath") != null
+                || ev.get("anchorPath") != null);
     }
 
     /** evidence 解析（与旧实现一致，抽出便于 history 复用数组校验路径）。 */
