@@ -1,0 +1,1402 @@
+[
+  {
+    "question": "nginx 的 proxy_buffering 指令默认是开启还是关闭？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "默认 on（开启缓冲）。",
+    "evidence": [
+      {
+        "docName": "nginx-proxy-buffering.md",
+        "titlePath": "nginx-proxy-buffering.md > 1.1. proxy_buffering 的行为",
+        "chunkId": "00d8c830-cff3-40a4-93dc-7b4b4c1be71b-c0002",
+        "contentHash": "5c734c885adef07b",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "nginx 关闭代理缓冲后，一次能接收的最大数据量由哪个指令的默认值决定？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "由 proxy_buffer_size 决定（关闭缓冲时一次能接收的最大数据量）。",
+    "evidence": [
+      {
+        "docName": "nginx-proxy-buffering.md",
+        "titlePath": "nginx-proxy-buffering.md > 1.1. proxy_buffering 的行为",
+        "chunkId": "00d8c830-cff3-40a4-93dc-7b4b4c1be71b-c0002",
+        "contentHash": "5c734c885adef07b",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "nginx 的 proxy_buffering 默认是 off 吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "语料明确 proxy_buffering 默认 on。",
+    "evidence": [],
+    "failureMode": "NUMERIC_MISMATCH",
+    "temptingEvidence": [
+      {
+        "docName": "nginx-proxy-buffering.md",
+        "titlePath": "nginx-proxy-buffering.md > 1.1. proxy_buffering 的行为",
+        "chunkId": "00d8c830-cff3-40a4-93dc-7b4b4c1be71b-c0002",
+        "contentHash": "5c734c885adef07b",
+        "page": null
+      }
+    ],
+    "missingRequirement": "问题把默认值方向搞反（on→off），属于默认值陷阱。"
+  },
+  {
+    "question": "SSE 接口经 nginx 代理时前端一直转圈，应该调大 proxy_buffers 吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "语料只说明流式场景应关闭缓冲（proxy_buffering off / X-Accel-Buffering: no），未支持「调大 proxy_buffers」的推断。",
+    "evidence": [],
+    "failureMode": "UNSUPPORTED_INFERENCE",
+    "temptingEvidence": [
+      {
+        "docName": "nginx-proxy-buffering.md",
+        "titlePath": "nginx-proxy-buffering.md > 1.2. 相关指令",
+        "chunkId": "00d8c830-cff3-40a4-93dc-7b4b4c1be71b-c0003",
+        "contentHash": "4000ad86e7134462",
+        "page": null
+      }
+    ],
+    "missingRequirement": "证据只给出 A→B 的反向处理（关闭缓冲），不能推出调大缓冲区有效。"
+  },
+  {
+    "question": "nginx 的 proxy_buffers 默认数量和大小是多少？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "默认 8 4k|8k（8 块，每块 4k 或 8k 一个内存页）。",
+    "evidence": [
+      {
+        "docName": "nginx-proxy-buffering.md",
+        "titlePath": "nginx-proxy-buffering.md > 1.2. 相关指令",
+        "chunkId": "00d8c830-cff3-40a4-93dc-7b4b4c1be71b-c0003",
+        "contentHash": "4000ad86e7134462",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "nginx 的 proxy_buffers 默认是 16 8k 吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "默认是 8 4k|8k；16 8k 只是示例配置里的写法，不是默认值。",
+    "evidence": [],
+    "failureMode": "NUMERIC_MISMATCH",
+    "temptingEvidence": [
+      {
+        "docName": "nginx-proxy-buffering.md",
+        "titlePath": "nginx-proxy-buffering.md > 1.4. 示例",
+        "chunkId": "00d8c830-cff3-40a4-93dc-7b4b4c1be71b-c0005",
+        "contentHash": "04c679f635e876a4",
+        "page": null
+      }
+    ],
+    "missingRequirement": "示例块中出现 16 8k，易被当成默认值。"
+  },
+  {
+    "question": "nginx 的 proxy_busy_buffers_size 默认是多少字节？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "语料只说默认为 proxy_buffers 中两块的大小，未给出具体字节数。",
+    "evidence": [],
+    "failureMode": "PARTIAL_EVIDENCE",
+    "temptingEvidence": [
+      {
+        "docName": "nginx-proxy-buffering.md",
+        "titlePath": "nginx-proxy-buffering.md > 1.2. 相关指令",
+        "chunkId": "00d8c830-cff3-40a4-93dc-7b4b4c1be71b-c0003",
+        "contentHash": "4000ad86e7134462",
+        "page": null
+      }
+    ],
+    "missingRequirement": "文档只给相对描述（两块大小），没有绝对数值。"
+  },
+  {
+    "question": "nginx 如何忽略后端返回的 X-Accel-Buffering 头？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "使用 proxy_ignore_headers X-Accel-Buffering;。",
+    "evidence": [
+      {
+        "docName": "nginx-proxy-buffering.md",
+        "titlePath": "nginx-proxy-buffering.md > 1.3. X-Accel-Buffering 响应头",
+        "chunkId": "00d8c830-cff3-40a4-93dc-7b4b4c1be71b-c0004",
+        "contentHash": "e6b57f110bf73949",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "X-Accel-Buffering: yes 可以让 nginx 永久关闭所有 location 的缓冲吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "该头只对单个响应动态生效；全局关闭需要改配置。语料未支持「永久/所有 location」的范围。",
+    "evidence": [],
+    "failureMode": "SCOPE_MISMATCH",
+    "temptingEvidence": [
+      {
+        "docName": "nginx-proxy-buffering.md",
+        "titlePath": "nginx-proxy-buffering.md > 1.3. X-Accel-Buffering 响应头",
+        "chunkId": "00d8c830-cff3-40a4-93dc-7b4b4c1be71b-c0004",
+        "contentHash": "e6b57f110bf73949",
+        "page": null
+      }
+    ],
+    "missingRequirement": "范围混淆：单响应动态生效 ≠ 全局永久生效。"
+  },
+  {
+    "question": "ES 集群状态为 yellow 时会有数据不可用吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "语料说 red 时部分数据不可用；yellow 只说节点故障时部分数据在修复前可能不可用——「yellow 是否意味着数据不可用」语料没有直接断言，需限定条件。",
+    "evidence": [],
+    "failureMode": "PARTIAL_EVIDENCE",
+    "temptingEvidence": [
+      {
+        "docName": "elasticsearch-cluster-health.md",
+        "titlePath": "elasticsearch-cluster-health.md > 1.1. 集群健康状态",
+        "chunkId": "399824aa-8fff-4c9b-8208-d612b291fb24-c0002",
+        "contentHash": "1882d9bb82b64858",
+        "page": null
+      }
+    ],
+    "missingRequirement": "yellow 的可用性结论依赖条件（节点故障时），无条件的 yes/no 语料未给出。"
+  },
+  {
+    "question": "ES 低水位磁盘阈值默认是多少？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "cluster.routing.allocation.disk.watermark.low 默认 85%。",
+    "evidence": [
+      {
+        "docName": "elasticsearch-cluster-health.md",
+        "titlePath": "elasticsearch-cluster-health.md > 1.2. 磁盘水位三阶段",
+        "chunkId": "399824aa-8fff-4c9b-8208-d612b291fb24-c0003",
+        "contentHash": "a14f7aabd0600de7",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "ES 磁盘使用率达到洪泛水位后会怎样？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "节点上的索引被加 index.blocks.read_only_allow_delete 块，拒绝写入（仅允许删除）。",
+    "evidence": [
+      {
+        "docName": "elasticsearch-cluster-health.md",
+        "titlePath": "elasticsearch-cluster-health.md > 1.2. 磁盘水位三阶段",
+        "chunkId": "399824aa-8fff-4c9b-8208-d612b291fb24-c0003",
+        "contentHash": "a14f7aabd0600de7",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "ES 的 flood_stage 水位默认是 90% 吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "flood_stage 默认 95%；90% 是高水位（high）的默认值。",
+    "evidence": [],
+    "failureMode": "NUMERIC_MISMATCH",
+    "temptingEvidence": [
+      {
+        "docName": "elasticsearch-cluster-health.md",
+        "titlePath": "elasticsearch-cluster-health.md > 1.2. 磁盘水位三阶段",
+        "chunkId": "399824aa-8fff-4c9b-8208-d612b291fb24-c0003",
+        "contentHash": "a14f7aabd0600de7",
+        "page": null
+      }
+    ],
+    "missingRequirement": "三个水位默认值（85/90/95）互相混淆。"
+  },
+  {
+    "question": "ES 磁盘高水位（high）超过后 ES 会做什么？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "开始把分片迁移到磁盘使用率较低的节点。",
+    "evidence": [
+      {
+        "docName": "elasticsearch-cluster-health.md",
+        "titlePath": "elasticsearch-cluster-health.md > 1.2. 磁盘水位三阶段",
+        "chunkId": "399824aa-8fff-4c9b-8208-d612b291fb24-c0003",
+        "contentHash": "a14f7aabd0600de7",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "磁盘超过高水位 90% 后，索引会被置为只读吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "置只读块的是洪泛水位 95%；90% 高水位的行为是迁移分片。",
+    "evidence": [],
+    "failureMode": "NUMERIC_MISMATCH",
+    "temptingEvidence": [
+      {
+        "docName": "elasticsearch-cluster-health.md",
+        "titlePath": "elasticsearch-cluster-health.md > 1.2. 磁盘水位三阶段",
+        "chunkId": "399824aa-8fff-4c9b-8208-d612b291fb24-c0003",
+        "contentHash": "a14f7aabd0600de7",
+        "page": null
+      }
+    ],
+    "missingRequirement": "行为与水位级别配对混淆。"
+  },
+  {
+    "question": "ES 磁盘水位可以配置为绝对值吗？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "可以，例如 500gb；磁盘使用率是节点级统计，多数据路径节点可按单盘计算。",
+    "evidence": [
+      {
+        "docName": "elasticsearch-cluster-health.md",
+        "titlePath": "elasticsearch-cluster-health.md > 1.2. 磁盘水位三阶段",
+        "chunkId": "399824aa-8fff-4c9b-8208-d612b291fb24-c0003",
+        "contentHash": "a14f7aabd0600de7",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "ES 低水位超过后已在节点上的分片会被迁走吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "语料只说低水位触发后「不再向该节点分配新分片」，未说明既有分片是否迁移。",
+    "evidence": [],
+    "failureMode": "PARTIAL_EVIDENCE",
+    "temptingEvidence": [
+      {
+        "docName": "elasticsearch-cluster-health.md",
+        "titlePath": "elasticsearch-cluster-health.md > 1.2. 磁盘水位三阶段",
+        "chunkId": "399824aa-8fff-4c9b-8208-d612b291fb24-c0003",
+        "contentHash": "a14f7aabd0600de7",
+        "page": null
+      }
+    ],
+    "missingRequirement": "文档只描述新分片分配行为，未描述存量分片处理。"
+  },
+  {
+    "question": "ES 磁盘恢复后 flood_stage 加上的只读块会自动解除吗？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "不会自动解除，必须手动 PUT /<索引名>/_settings 将 index.blocks.read_only_allow_delete 置 null。",
+    "evidence": [
+      {
+        "docName": "elasticsearch-cluster-health.md",
+        "titlePath": "elasticsearch-cluster-health.md > 1.3. 磁盘超限的处理步骤",
+        "chunkId": "399824aa-8fff-4c9b-8208-d612b291fb24-c0004",
+        "contentHash": "fce6668867ccef82",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "对因磁盘超限分配失败的分片，ES 里用什么命令重试分配？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "POST _cluster/reroute?retry_failed=true。",
+    "evidence": [
+      {
+        "docName": "elasticsearch-cluster-health.md",
+        "titlePath": "elasticsearch-cluster-health.md > 1.3. 磁盘超限的处理步骤",
+        "chunkId": "399824aa-8fff-4c9b-8208-d612b291fb24-c0004",
+        "contentHash": "fce6668867ccef82",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "ES 里面分片一直 ALLOCATION_FAILED，重试分配应该调哪个 API？",
+    "answerable": true,
+    "category": "TERM_VARIATION",
+    "referenceAnswer": "POST _cluster/reroute?retry_failed=true。",
+    "evidence": [
+      {
+        "docName": "elasticsearch-cluster-health.md",
+        "titlePath": "elasticsearch-cluster-health.md > 1.3. 磁盘超限的处理步骤",
+        "chunkId": "399824aa-8fff-4c9b-8208-d612b291fb24-c0004",
+        "contentHash": "fce6668867ccef82",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "ES 副本分片数大于集群节点数会怎样？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "副本永远无法分配，集群长期 yellow——这不是故障，需按容量规划调整 number_of_replicas。",
+    "evidence": [
+      {
+        "docName": "elasticsearch-cluster-health.md",
+        "titlePath": "elasticsearch-cluster-health.md > 1.4. 未分配分片的排查",
+        "chunkId": "399824aa-8fff-4c9b-8208-d612b291fb24-c0005",
+        "contentHash": "008a56f55c6e4f31",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "ES 集群长期 yellow，把 number_of_replicas 调小一定能解决所有未分配问题吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "副本数大于节点数只是未分配的常见原因之一（磁盘水位、节点离线等也可能）；语料未支持「一定解决所有」的全称结论。",
+    "evidence": [],
+    "failureMode": "SCOPE_MISMATCH",
+    "temptingEvidence": [
+      {
+        "docName": "elasticsearch-cluster-health.md",
+        "titlePath": "elasticsearch-cluster-health.md > 1.4. 未分配分片的排查",
+        "chunkId": "399824aa-8fff-4c9b-8208-d612b291fb24-c0005",
+        "contentHash": "008a56f55c6e4f31",
+        "page": null
+      }
+    ],
+    "missingRequirement": "把其中一个原因当成充分条件，范围放大。"
+  },
+  {
+    "question": "proxy_max_temp_file_size 的默认值是多少？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "1024m（0 表示禁用临时文件）。",
+    "evidence": [
+      {
+        "docName": "nginx-proxy-guide.docx",
+        "titlePath": "nginx-proxy-guide.docx > 1.3. 常用参数速查表",
+        "chunkId": "3a39b6a6-4a6d-46ad-b8d2-d91323fd471f-c0004",
+        "contentHash": "61140b76b88c087a",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "proxy_connect_timeout 默认是多少秒？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "60s（通常应设为 75s 以内）。",
+    "evidence": [
+      {
+        "docName": "nginx-proxy-guide.docx",
+        "titlePath": "nginx-proxy-guide.docx > 1.2. 关键超时参数",
+        "chunkId": "3a39b6a6-4a6d-46ad-b8d2-d91323fd471f-c0003",
+        "contentHash": "0ed541d440505063",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "nginx 代理读超时默认 60 分钟吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "proxy_read_timeout 默认 60s（秒），不是 60 分钟。",
+    "evidence": [],
+    "failureMode": "NUMERIC_MISMATCH",
+    "temptingEvidence": [
+      {
+        "docName": "nginx-proxy-guide.docx",
+        "titlePath": "nginx-proxy-guide.docx > 1.2. 关键超时参数",
+        "chunkId": "3a39b6a6-4a6d-46ad-b8d2-d91323fd471f-c0003",
+        "contentHash": "0ed541d440505063",
+        "page": null
+      }
+    ],
+    "missingRequirement": "单位陷阱：秒 vs 分钟。"
+  },
+  {
+    "question": "proxy_max_temp_file_size 设为 0 是什么效果？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "禁用临时文件，超出部分同步转发给客户端并阻塞读取后端。",
+    "evidence": [
+      {
+        "docName": "nginx-proxy-guide.docx",
+        "titlePath": "nginx-proxy-guide.docx > 1.1.1. 缓冲区大小溢出行为",
+        "chunkId": "3a39b6a6-4a6d-46ad-b8d2-d91323fd471f-c0002",
+        "contentHash": "932efeadd83e247d",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "proxy_max_temp_file_size 设为 0 后响应体超出部分会丢弃吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "语料说超出部分同步转发给客户端并阻塞读取后端，未说丢弃。",
+    "evidence": [],
+    "failureMode": "UNSUPPORTED_INFERENCE",
+    "temptingEvidence": [
+      {
+        "docName": "nginx-proxy-guide.docx",
+        "titlePath": "nginx-proxy-guide.docx > 1.1.1. 缓冲区大小溢出行为",
+        "chunkId": "3a39b6a6-4a6d-46ad-b8d2-d91323fd471f-c0002",
+        "contentHash": "932efeadd83e247d",
+        "page": null
+      }
+    ],
+    "missingRequirement": "把「禁用临时文件」推断成「丢弃数据」。"
+  },
+  {
+    "question": "nginx 开源版有内置的主动健康检查吗？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "主动健康检查是商业版功能；开源版常用第三方模块或应用层探活替代。",
+    "evidence": [
+      {
+        "docName": "nginx-proxy-guide.docx",
+        "titlePath": "nginx-proxy-guide.docx > 1.4. 健康检查与故障转移",
+        "chunkId": "3a39b6a6-4a6d-46ad-b8d2-d91323fd471f-c0005",
+        "contentHash": "064e46f9e6d2b633",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "nginx 开源版主动健康检查的间隔默认是多少秒？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "语料明确主动健康检查是商业版功能，未给出任何间隔参数。",
+    "evidence": [],
+    "failureMode": "PARTIAL_EVIDENCE",
+    "temptingEvidence": [
+      {
+        "docName": "nginx-proxy-guide.docx",
+        "titlePath": "nginx-proxy-guide.docx > 1.4. 健康检查与故障转移",
+        "chunkId": "3a39b6a6-4a6d-46ad-b8d2-d91323fd471f-c0005",
+        "contentHash": "064e46f9e6d2b633",
+        "page": null
+      }
+    ],
+    "missingRequirement": "对不存在于开源版的功能询问默认参数。"
+  },
+  {
+    "question": "产品 A 是什么定位的机型？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "旗舰机型。",
+    "evidence": [
+      {
+        "docName": "sales-r5-fixture.xlsx",
+        "titlePath": "sales-r5-fixture.xlsx > 产品说明 > 数据行 1-2",
+        "chunkId": "7ce6fa17-989b-4029-a188-446baa98ebe5-c0003",
+        "contentHash": "474b92498f01a8c7",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "产品 A 在华东地区 Q2 销售额是多少，它属于什么机型？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "华东 Q2 销售额 120；产品 A 是旗舰机型。前者来自区域销售表，后者来自产品说明表。",
+    "evidence": [
+      {
+        "docName": "sales-r5-fixture.xlsx",
+        "titlePath": "sales-r5-fixture.xlsx > 区域销售 > 数据行 1-4",
+        "chunkId": "7ce6fa17-989b-4029-a188-446baa98ebe5-c0001",
+        "contentHash": "8a0af81228caa456",
+        "page": null
+      },
+      {
+        "docName": "sales-r5-fixture.xlsx",
+        "titlePath": "sales-r5-fixture.xlsx > 产品说明 > 数据行 1-2",
+        "chunkId": "7ce6fa17-989b-4029-a188-446baa98ebe5-c0003",
+        "contentHash": "474b92498f01a8c7",
+        "page": null
+      }
+    ],
+    "evidenceMode": "MULTI_CHUNK"
+  },
+  {
+    "question": "华东地区 A 和 C 两个产品的 Q2 销售额分别是多少？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "A 为 120，C 为 60。",
+    "evidence": [
+      {
+        "docName": "sales-r5-fixture.xlsx",
+        "titlePath": "sales-r5-fixture.xlsx > 区域销售 > 数据行 1-4",
+        "chunkId": "7ce6fa17-989b-4029-a188-446baa98ebe5-c0001",
+        "contentHash": "8a0af81228caa456",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "产品 D 的 Q2 销售额是多少？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "产品说明表只有 D 的说明（测试覆盖机型），区域销售表没有产品 D 的行——两表合起来也没有 D 的销售额。",
+    "evidence": [],
+    "failureMode": "PARTIAL_EVIDENCE",
+    "temptingEvidence": [
+      {
+        "docName": "sales-r5-fixture.xlsx",
+        "titlePath": "sales-r5-fixture.xlsx > 产品说明 > 数据行 1-2",
+        "chunkId": "7ce6fa17-989b-4029-a188-446baa98ebe5-c0003",
+        "contentHash": "474b92498f01a8c7",
+        "page": null
+      }
+    ],
+    "missingRequirement": "D 不在销售数据中，仅出现在产品说明。"
+  },
+  {
+    "question": "华东地区总销售额占全公司一半以上吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "语料给出华东 A+C 的 Q2=180 与合计 270（Q2），但「占比是否过半」这类比较结论不是文档明确陈述。",
+    "evidence": [],
+    "failureMode": "UNSUPPORTED_INFERENCE",
+    "temptingEvidence": [
+      {
+        "docName": "sales-r5-fixture.xlsx",
+        "titlePath": "sales-r5-fixture.xlsx > 区域销售 > 数据行 1-4",
+        "chunkId": "7ce6fa17-989b-4029-a188-446baa98ebe5-c0001",
+        "contentHash": "8a0af81228caa456",
+        "page": null
+      }
+    ],
+    "missingRequirement": "文档没有占比陈述；按 Q2 算 180/270 刚好 2/3 属于外部计算推断。"
+  },
+  {
+    "question": "OFFSET_OUT_OF_RANGE 错误的常见处置建议是什么？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "按 auto.offset.reset 策略重置位移（earliest/latest）。",
+    "evidence": [
+      {
+        "docName": "kafka-error-codes.csv",
+        "titlePath": "kafka-error-codes.csv > 数据行 1-5",
+        "chunkId": "9412357e-1010-4914-8fb9-f8548893ac41-c0001",
+        "contentHash": "00a20f1137e70e82",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "MESSAGE_TOO_LARGE 属于哪一端的问题？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "生产端（消息超过 max.message.bytes）。",
+    "evidence": [
+      {
+        "docName": "kafka-error-codes.csv",
+        "titlePath": "kafka-error-codes.csv > 数据行 1-5",
+        "chunkId": "9412357e-1010-4914-8fb9-f8548893ac41-c0001",
+        "contentHash": "00a20f1137e70e82",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "OFFSET_OUT_OF_RANGE 是集群端错误吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "OFFSET_OUT_OF_RANGE 类别是消费端。",
+    "evidence": [],
+    "failureMode": "ENTITY_MISMATCH",
+    "temptingEvidence": [
+      {
+        "docName": "kafka-error-codes.csv",
+        "titlePath": "kafka-error-codes.csv > 数据行 1-5",
+        "chunkId": "9412357e-1010-4914-8fb9-f8548893ac41-c0001",
+        "contentHash": "00a20f1137e70e82",
+        "page": null
+      }
+    ],
+    "missingRequirement": "消费端/集群端类别混淆。"
+  },
+  {
+    "question": "Kafka broker 端磁盘写满时返回什么错误码？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "错误码表没有磁盘写满相关错误码。",
+    "evidence": [],
+    "failureMode": "OUT_OF_KB",
+    "temptingEvidence": [
+      {
+        "docName": "kafka-error-codes.csv",
+        "titlePath": "kafka-error-codes.csv > 数据行 1-5",
+        "chunkId": "9412357e-1010-4914-8fb9-f8548893ac41-c0001",
+        "contentHash": "00a20f1137e70e82",
+        "page": null
+      }
+    ],
+    "missingRequirement": "表内 6 个错误码均与磁盘无关。"
+  },
+  {
+    "question": "REBALANCE_IN_PROGRESS 触发后应该怎么处理？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "排查频繁上下线；调大 max.poll.interval.ms 或减小 max.poll.records。",
+    "evidence": [
+      {
+        "docName": "kafka-error-codes.csv",
+        "titlePath": "kafka-error-codes.csv > 数据行 1-5",
+        "chunkId": "9412357e-1010-4914-8fb9-f8548893ac41-c0001",
+        "contentHash": "00a20f1137e70e82",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "消费者组内消费者数量超过分区数会怎样？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "超出的消费者分配不到任何分区而空闲空跑。",
+    "evidence": [
+      {
+        "docName": "kafka-consumer-groups.md",
+        "titlePath": "kafka-consumer-groups.md > 1.1. 消费者组的核心规则",
+        "chunkId": "af1f9d72-3889-44cd-a72f-4d1a4ff9bbf1-c0002",
+        "contentHash": "bc847cc41365cec1",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "Kafka 把消费者组的位移持久化在哪个内部主题里？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "__consumer_offsets（压缩主题），组协调器负责成员管理与再平衡。",
+    "evidence": [
+      {
+        "docName": "kafka-consumer-groups.md",
+        "titlePath": "kafka-consumer-groups.md > 1.1. 消费者组的核心规则",
+        "chunkId": "af1f9d72-3889-44cd-a72f-4d1a4ff9bbf1-c0002",
+        "contentHash": "bc847cc41365cec1",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "Kafka 生产者的消息默认保留几天？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "消费者组文档不含消息保留策略。",
+    "evidence": [],
+    "failureMode": "OUT_OF_KB",
+    "temptingEvidence": [
+      {
+        "docName": "kafka-consumer-groups.md",
+        "titlePath": "kafka-consumer-groups.md > 1.1. 消费者组的核心规则",
+        "chunkId": "af1f9d72-3889-44cd-a72f-4d1a4ff9bbf1-c0002",
+        "contentHash": "bc847cc41365cec1",
+        "page": null
+      }
+    ],
+    "missingRequirement": "retention 主题不在语料中。"
+  },
+  {
+    "question": "增加 Kafka 主题分区数对按 key 的顺序性有什么影响？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "增加分区会破坏按 key 的顺序性，已有主题扩分区需谨慎。",
+    "evidence": [
+      {
+        "docName": "kafka-consumer-groups.md",
+        "titlePath": "kafka-consumer-groups.md > 1.5. 积压的常见原因与处理",
+        "chunkId": "af1f9d72-3889-44cd-a72f-4d1a4ff9bbf1-c0006",
+        "contentHash": "8f2c77c4fe83debb",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "Kafka 消费积压时可以通过重置位移跳过消息吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "语料明确「不要用重置位移的方式跳过消息（会丢数据）」。",
+    "evidence": [],
+    "failureMode": "UNSUPPORTED_INFERENCE",
+    "temptingEvidence": [
+      {
+        "docName": "kafka-consumer-groups.md",
+        "titlePath": "kafka-consumer-groups.md > 1.5. 积压的常见原因与处理",
+        "chunkId": "af1f9d72-3889-44cd-a72f-4d1a4ff9bbf1-c0006",
+        "contentHash": "8f2c77c4fe83debb",
+        "page": null
+      }
+    ],
+    "missingRequirement": "问题断言与语料处置原则相反。"
+  },
+  {
+    "question": "Kafka 消费者扩容到超过分区数以后，提升消费并行度还有用吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "扩容上限是分区数，分区不足时扩消费者无效（并行度不再提升）。",
+    "evidence": [],
+    "failureMode": "NUMERIC_MISMATCH",
+    "temptingEvidence": [
+      {
+        "docName": "kafka-consumer-groups.md",
+        "titlePath": "kafka-consumer-groups.md > 1.5. 积压的常见原因与处理",
+        "chunkId": "af1f9d72-3889-44cd-a72f-4d1a4ff9bbf1-c0006",
+        "contentHash": "8f2c77c4fe83debb",
+        "page": null
+      }
+    ],
+    "missingRequirement": "问题问「还有用吗」，语料的结论是无效果。"
+  },
+  {
+    "question": "Kafka Consumer Lag 的计算公式是什么？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "Lag = 分区日志最新位移（LEO）− 消费者已提交/已消费位移，单位是消息数。",
+    "evidence": [
+      {
+        "docName": "kafka-consumer-groups.md",
+        "titlePath": "kafka-consumer-groups.md > 1.3. 消费位移与 Lag",
+        "chunkId": "af1f9d72-3889-44cd-a72f-4d1a4ff9bbf1-c0004",
+        "contentHash": "f62ed3c0c8fa027e",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "Kafka 再平衡期间消费者还在继续消费吗？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "整个组内消费者停止消费，直到分配完成；频繁再平衡会显著影响吞吐。",
+    "evidence": [
+      {
+        "docName": "kafka-consumer-groups.md",
+        "titlePath": "kafka-consumer-groups.md > 1.2. 再平衡（Rebalance）",
+        "chunkId": "af1f9d72-3889-44cd-a72f-4d1a4ff9bbf1-c0003",
+        "contentHash": "0ea264219a11518c",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "避免 GC 暂停导致心跳超时的误判，应该调小 session.timeout.ms 吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "语料说调大 session.timeout.ms 的合理性，不是调小。",
+    "evidence": [],
+    "failureMode": "NUMERIC_MISMATCH",
+    "temptingEvidence": [
+      {
+        "docName": "kafka-consumer-groups.md",
+        "titlePath": "kafka-consumer-groups.md > 1.2. 再平衡（Rebalance）",
+        "chunkId": "af1f9d72-3889-44cd-a72f-4d1a4ff9bbf1-c0003",
+        "contentHash": "0ea264219a11518c",
+        "page": null
+      }
+    ],
+    "missingRequirement": "调整方向相反。"
+  },
+  {
+    "question": "Redis 的 appendfsync 每秒刷盘策略灾难时最多丢多少数据？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "最多丢 1 秒数据；everysec 是建议且默认策略。",
+    "evidence": [
+      {
+        "docName": "redis-persistence.md",
+        "titlePath": "redis-persistence.md > 1.3.1. 三种 fsync 策略（appendfsync）",
+        "chunkId": "bfc99812-f011-487d-85fa-382290ad273d-c0005",
+        "contentHash": "b17e5488dd0f38e4",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "Redis appendfsync always 是最快的策略吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "always 非常慢也非常安全；最快的是 no 策略。",
+    "evidence": [],
+    "failureMode": "NUMERIC_MISMATCH",
+    "temptingEvidence": [
+      {
+        "docName": "redis-persistence.md",
+        "titlePath": "redis-persistence.md > 1.3.1. 三种 fsync 策略（appendfsync）",
+        "chunkId": "bfc99812-f011-487d-85fa-382290ad273d-c0005",
+        "contentHash": "b17e5488dd0f38e4",
+        "page": null
+      }
+    ],
+    "missingRequirement": "速度与安全性的配对混淆。"
+  },
+  {
+    "question": "Redis AOF 和 RDB 同时开启时，重启后用哪个重建数据集？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "用 AOF 重建，因为它保证是最完整的。",
+    "evidence": [
+      {
+        "docName": "redis-persistence.md",
+        "titlePath": "redis-persistence.md > 1.6. RDB 与 AOF 的相互作用",
+        "chunkId": "bfc99812-f011-487d-85fa-382290ad273d-c0008",
+        "contentHash": "978e1b60c2572f25",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "Redis 2.4 起允许 BGSAVE 和 AOF 重写同时进行吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "2.4 起避免两个后台进程同时做重磁盘 IO：快照进行中不触发 AOF 重写，反之亦然。",
+    "evidence": [],
+    "failureMode": "VERSION_CONFLICT",
+    "temptingEvidence": [
+      {
+        "docName": "redis-persistence.md",
+        "titlePath": "redis-persistence.md > 1.6. RDB 与 AOF 的相互作用",
+        "chunkId": "bfc99812-f011-487d-85fa-382290ad273d-c0008",
+        "contentHash": "978e1b60c2572f25",
+        "page": null
+      }
+    ],
+    "missingRequirement": "旧版本行为与新版本行为混淆（2.4 前/后）。"
+  },
+  {
+    "question": "Redis 官方建议只开 AOF 不做 RDB 快照吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "官方不建议只用 AOF：定期 RDB 快照对备份、更快重启及 AOF 引擎 bug 兜底都有价值。",
+    "evidence": [],
+    "failureMode": "UNSUPPORTED_INFERENCE",
+    "temptingEvidence": [
+      {
+        "docName": "redis-persistence.md",
+        "titlePath": "redis-persistence.md > 1.5. 如何选择",
+        "chunkId": "bfc99812-f011-487d-85fa-382290ad273d-c0007",
+        "contentHash": "d39d502d0289ef60",
+        "page": null
+      }
+    ],
+    "missingRequirement": "问题断言与官方建议相反。"
+  },
+  {
+    "question": "Redis RDB 快照为什么大数据集下重启比 AOF 快？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "RDB 是紧凑的单文件时间点表示，直接加载即可；AOF 需重放日志重建。",
+    "evidence": [
+      {
+        "docName": "redis-persistence.md",
+        "titlePath": "redis-persistence.md > 1.2. RDB 的优缺点",
+        "chunkId": "bfc99812-f011-487d-85fa-382290ad273d-c0003",
+        "contentHash": "b6e4faa64efabffe",
+        "page": null
+      },
+      {
+        "docName": "redis-persistence.md",
+        "titlePath": "redis-persistence.md > 1.1. 持久化方式概览",
+        "chunkId": "bfc99812-f011-487d-85fa-382290ad273d-c0002",
+        "contentHash": "9512839b7ca5b0a9",
+        "page": null
+      }
+    ],
+    "evidenceMode": "MULTI_CHUNK"
+  },
+  {
+    "question": "RDB 快照期间的写操作会丢失吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "语料说快照「通常每五分钟或更久才做一次，宕机会丢最近几分钟数据」，但「快照期间的写是否会丢」取决于宕机时机，语料没有逐条断言。",
+    "evidence": [],
+    "failureMode": "PARTIAL_EVIDENCE",
+    "temptingEvidence": [
+      {
+        "docName": "redis-persistence.md",
+        "titlePath": "redis-persistence.md > 1.2. RDB 的优缺点",
+        "chunkId": "bfc99812-f011-487d-85fa-382290ad273d-c0003",
+        "contentHash": "b6e4faa64efabffe",
+        "page": null
+      }
+    ],
+    "missingRequirement": "语料只有粒度级的丢失描述，没有逐写操作的断言。"
+  },
+  {
+    "question": "HikariCP 的 maximumPoolSize 默认是多少？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "10（重启生效）。",
+    "evidence": [
+      {
+        "docName": "hikari-cp-reference.xlsx",
+        "titlePath": "hikari-cp-reference.xlsx > 参数说明 > 数据行 1-8",
+        "chunkId": "faaa9513-2c37-4736-a6fd-e7143cf6ac6e-c0001",
+        "contentHash": "3bb44a355873724b",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "HikariCP 的 connectionTimeout 默认是多少？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "30000 ms。",
+    "evidence": [
+      {
+        "docName": "hikari-cp-reference.xlsx",
+        "titlePath": "hikari-cp-reference.xlsx > 参数说明 > 数据行 1-8",
+        "chunkId": "faaa9513-2c37-4736-a6fd-e7143cf6ac6e-c0001",
+        "contentHash": "3bb44a355873724b",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "HikariCP 的 maximumPoolSize 默认是 20 吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "默认 10；20 是「常规 Web 应用（并发 100）」场景的建议值。",
+    "evidence": [],
+    "failureMode": "NUMERIC_MISMATCH",
+    "temptingEvidence": [
+      {
+        "docName": "hikari-cp-reference.xlsx",
+        "titlePath": "hikari-cp-reference.xlsx > 容量估算 > 数据行 1-3",
+        "chunkId": "faaa9513-2c37-4736-a6fd-e7143cf6ac6e-c0005",
+        "contentHash": "26f96f5fd2251680",
+        "page": null
+      }
+    ],
+    "missingRequirement": "默认值与容量估算推荐值混淆。"
+  },
+  {
+    "question": "Communications link failure 与 HikariCP 哪个参数有关，怎么处置？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "连接存活超过服务端 wait_timeout；将 maxLifetime 设为小于 MySQL wait_timeout 的值。",
+    "evidence": [
+      {
+        "docName": "hikari-cp-reference.xlsx",
+        "titlePath": "hikari-cp-reference.xlsx > 常见问题 > 数据行 1-4",
+        "chunkId": "faaa9513-2c37-4736-a6fd-e7143cf6ac6e-c0003",
+        "contentHash": "f206425b30d4df32",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "低频后台任务场景下 HikariCP 建议 maximumPoolSize 是多少，依据是什么？",
+    "answerable": true,
+    "category": "DIRECT",
+    "referenceAnswer": "5；核心数×2，DB CPU 占用可忽略。",
+    "evidence": [
+      {
+        "docName": "hikari-cp-reference.xlsx",
+        "titlePath": "hikari-cp-reference.xlsx > 容量估算 > 数据行 1-3",
+        "chunkId": "faaa9513-2c37-4736-a6fd-e7143cf6ac6e-c0005",
+        "contentHash": "26f96f5fd2251680",
+        "page": null
+      }
+    ],
+    "evidenceMode": "SINGLE_CHUNK"
+  },
+  {
+    "question": "HikariCP 建议 production 环境把 maximumPoolSize 设为 40 吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "40 只是「高吞吐 OLTP（并发 500）」场景的建议；对所有生产环境一概建议 40 超出语料范围。",
+    "evidence": [],
+    "failureMode": "SCOPE_MISMATCH",
+    "temptingEvidence": [
+      {
+        "docName": "hikari-cp-reference.xlsx",
+        "titlePath": "hikari-cp-reference.xlsx > 容量估算 > 数据行 1-3",
+        "chunkId": "faaa9513-2c37-4736-a6fd-e7143cf6ac6e-c0005",
+        "contentHash": "26f96f5fd2251680",
+        "page": null
+      }
+    ],
+    "missingRequirement": "场景化建议被泛化成全局推荐。"
+  },
+  {
+    "question": "HikariCP 的 minimumIdle 可以设成 0 吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "语料只说 minimumIdle 默认同 maximumPoolSize，没有取值范围说明。",
+    "evidence": [],
+    "failureMode": "OUT_OF_KB",
+    "temptingEvidence": [
+      {
+        "docName": "hikari-cp-reference.xlsx",
+        "titlePath": "hikari-cp-reference.xlsx > 参数说明 > 数据行 1-8",
+        "chunkId": "faaa9513-2c37-4736-a6fd-e7143cf6ac6e-c0001",
+        "contentHash": "3bb44a355873724b",
+        "page": null
+      }
+    ],
+    "missingRequirement": "语料未覆盖该配置的取值边界。"
+  },
+  {
+    "question": "那 minimumIdle 呢？",
+    "answerable": true,
+    "category": "FOLLOW_UP",
+    "referenceAnswer": "minimumIdle 默认同 maximumPoolSize（重启生效）。",
+    "evidence": [
+      {
+        "docName": "hikari-cp-reference.xlsx",
+        "titlePath": "hikari-cp-reference.xlsx > 参数说明 > 数据行 1-8",
+        "chunkId": "faaa9513-2c37-4736-a6fd-e7143cf6ac6e-c0001",
+        "contentHash": "3bb44a355873724b",
+        "page": null
+      }
+    ],
+    "evidenceMode": "FOLLOW_UP",
+    "history": [
+      {
+        "role": "user",
+        "content": "HikariCP 的 maximumPoolSize 默认是多少？"
+      },
+      {
+        "role": "assistant",
+        "content": "默认 10，重启生效。"
+      }
+    ]
+  },
+  {
+    "question": "这个配置要重启才生效吗？",
+    "answerable": true,
+    "category": "FOLLOW_UP",
+    "referenceAnswer": "是，这些连接池参数（maximumPoolSize/minimumIdle/connectionTimeout/idleTimeout/maxLifetime）都标注重启生效。",
+    "evidence": [
+      {
+        "docName": "hikari-cp-reference.xlsx",
+        "titlePath": "hikari-cp-reference.xlsx > 参数说明 > 数据行 1-8",
+        "chunkId": "faaa9513-2c37-4736-a6fd-e7143cf6ac6e-c0001",
+        "contentHash": "3bb44a355873724b",
+        "page": null
+      }
+    ],
+    "evidenceMode": "FOLLOW_UP",
+    "history": [
+      {
+        "role": "user",
+        "content": "HikariCP 的 maxLifetime 默认是多少？"
+      },
+      {
+        "role": "assistant",
+        "content": "1800000 ms。"
+      }
+    ]
+  },
+  {
+    "question": "前者是多少？",
+    "answerable": true,
+    "category": "FOLLOW_UP",
+    "referenceAnswer": "idleTimeout 默认 600000 ms。",
+    "evidence": [
+      {
+        "docName": "hikari-cp-reference.xlsx",
+        "titlePath": "hikari-cp-reference.xlsx > 参数说明 > 数据行 1-8",
+        "chunkId": "faaa9513-2c37-4736-a6fd-e7143cf6ac6e-c0001",
+        "contentHash": "3bb44a355873724b",
+        "page": null
+      }
+    ],
+    "evidenceMode": "FOLLOW_UP",
+    "history": [
+      {
+        "role": "user",
+        "content": "HikariCP 里 idleTimeout 和 cachePrepStmts 分别是什么默认值？"
+      },
+      {
+        "role": "assistant",
+        "content": "idleTimeout 是 600000 ms，cachePrepStmts 默认 true。"
+      }
+    ]
+  },
+  {
+    "question": "它默认开启吗？",
+    "answerable": true,
+    "category": "FOLLOW_UP",
+    "referenceAnswer": "cachePrepStmts 默认 true（开启）。",
+    "evidence": [
+      {
+        "docName": "hikari-cp-reference.xlsx",
+        "titlePath": "hikari-cp-reference.xlsx > 参数说明 > 数据行 1-8",
+        "chunkId": "faaa9513-2c37-4736-a6fd-e7143cf6ac6e-c0001",
+        "contentHash": "3bb44a355873724b",
+        "page": null
+      }
+    ],
+    "evidenceMode": "FOLLOW_UP",
+    "history": [
+      {
+        "role": "user",
+        "content": "HikariCP 数据源参数里 cachePrepStmts 是什么？"
+      },
+      {
+        "role": "assistant",
+        "content": "是数据源模块的参数。"
+      }
+    ]
+  },
+  {
+    "question": "PostgreSQL 17 新增了哪些特性？",
+    "answerable": false,
+    "category": "OUT_OF_KB",
+    "referenceAnswer": "知识库没有任何 PostgreSQL 内容。",
+    "evidence": [],
+    "failureMode": "OUT_OF_KB",
+    "missingRequirement": "完全超纲。"
+  },
+  {
+    "question": "Spring Boot 3.4 的虚拟线程调度默认策略是什么？",
+    "answerable": false,
+    "category": "OUT_OF_KB",
+    "referenceAnswer": "知识库没有任何 Spring Boot 版本特性内容。",
+    "evidence": [],
+    "failureMode": "OUT_OF_KB",
+    "missingRequirement": "完全超纲。"
+  },
+  {
+    "question": "MySQL 8.2 引入了什么新功能？",
+    "answerable": false,
+    "category": "OUT_OF_KB",
+    "referenceAnswer": "知识库没有 MySQL 版本特性内容（wait_timeout 只作为 HikariCP 语境的引用出现）。",
+    "evidence": [],
+    "failureMode": "OUT_OF_KB",
+    "temptingEvidence": [
+      {
+        "docName": "hikari-cp-reference.xlsx",
+        "titlePath": "hikari-cp-reference.xlsx > 常见问题 > 数据行 1-4",
+        "chunkId": "faaa9513-2c37-4736-a6fd-e7143cf6ac6e-c0003",
+        "contentHash": "f206425b30d4df32",
+        "page": null
+      }
+    ],
+    "missingRequirement": "完全超纲；hikari 常见问题表提到 MySQL wait_timeout，可能诱导误答。"
+  },
+  {
+    "question": "Redis Cluster 模式下 MOVED 重定向怎么处理？",
+    "answerable": false,
+    "category": "OUT_OF_KB",
+    "referenceAnswer": "知识库只有 Redis 持久化文档，没有 Redis Cluster 内容。",
+    "evidence": [],
+    "failureMode": "OUT_OF_KB",
+    "temptingEvidence": [
+      {
+        "docName": "redis-persistence.md",
+        "titlePath": "redis-persistence.md > 1.1. 持久化方式概览",
+        "chunkId": "bfc99812-f011-487d-85fa-382290ad273d-c0002",
+        "contentHash": "9512839b7ca5b0a9",
+        "page": null
+      }
+    ],
+    "missingRequirement": "Redis Cluster 与持久化主题无关；「Redis」相关词会诱导检索。"
+  },
+  {
+    "question": "Nginx Plus 的主动健康检查间隔怎么配置？",
+    "answerable": false,
+    "category": "OUT_OF_KB",
+    "referenceAnswer": "语料只说明主动健康检查是商业版（Nginx Plus）功能，没有其配置方法。",
+    "evidence": [],
+    "failureMode": "OUT_OF_KB",
+    "temptingEvidence": [
+      {
+        "docName": "nginx-proxy-guide.docx",
+        "titlePath": "nginx-proxy-guide.docx > 1.4. 健康检查与故障转移",
+        "chunkId": "3a39b6a6-4a6d-46ad-b8d2-d91323fd471f-c0005",
+        "contentHash": "064e46f9e6d2b633",
+        "page": null
+      }
+    ],
+    "missingRequirement": "提到商业版但无配置内容。"
+  },
+  {
+    "question": "Kafka Connect 分布式模式的 REST API 端口是多少？",
+    "answerable": false,
+    "category": "OUT_OF_KB",
+    "referenceAnswer": "知识库没有 Kafka Connect 内容。",
+    "evidence": [],
+    "failureMode": "OUT_OF_KB",
+    "temptingEvidence": [
+      {
+        "docName": "kafka-consumer-groups.md",
+        "titlePath": "kafka-consumer-groups.md > 1.1. 消费者组的核心规则",
+        "chunkId": "af1f9d72-3889-44cd-a72f-4d1a4ff9bbf1-c0002",
+        "contentHash": "bc847cc41365cec1",
+        "page": null
+      }
+    ],
+    "missingRequirement": "Kafka 相关词诱导，但 Connect 主题超纲。"
+  },
+  {
+    "question": "Redis Sentinel 的故障转移超时默认是多少秒？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "知识库只有 Redis 持久化文档，没有 Sentinel 内容——「Redis」相关词丰富但实体不一致。",
+    "evidence": [],
+    "failureMode": "ENTITY_MISMATCH",
+    "temptingEvidence": [
+      {
+        "docName": "redis-persistence.md",
+        "titlePath": "redis-persistence.md > 1.1. 持久化方式概览",
+        "chunkId": "bfc99812-f011-487d-85fa-382290ad273d-c0002",
+        "contentHash": "9512839b7ca5b0a9",
+        "page": null
+      }
+    ],
+    "missingRequirement": "Sentinel 主题不存在于语料。"
+  },
+  {
+    "question": "Kafka Consumer 的 fetch.max.bytes 默认是多少？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "语料是消费者组与积压文档，没有 fetch.max.bytes 参数。",
+    "evidence": [],
+    "failureMode": "ENTITY_MISMATCH",
+    "temptingEvidence": [
+      {
+        "docName": "kafka-consumer-groups.md",
+        "titlePath": "kafka-consumer-groups.md > 1.1. 消费者组的核心规则",
+        "chunkId": "af1f9d72-3889-44cd-a72f-4d1a4ff9bbf1-c0002",
+        "contentHash": "bc847cc41365cec1",
+        "page": null
+      }
+    ],
+    "missingRequirement": "Consumer 相关词多，但该参数不在语料。"
+  },
+  {
+    "question": "Druid 连接池的 maxActive 默认是多少？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "语料只有 HikariCP 参数，Druid 完全不在知识库。",
+    "evidence": [],
+    "failureMode": "ENTITY_MISMATCH",
+    "temptingEvidence": [
+      {
+        "docName": "hikari-cp-reference.xlsx",
+        "titlePath": "hikari-cp-reference.xlsx > 参数说明 > 数据行 1-8",
+        "chunkId": "faaa9513-2c37-4736-a6fd-e7143cf6ac6e-c0001",
+        "contentHash": "3bb44a355873724b",
+        "page": null
+      }
+    ],
+    "missingRequirement": "连接池相关词高度重合，实体不同。"
+  },
+  {
+    "question": "Elasticsearch 节点级磁盘水位检查针对的是单个分片吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "磁盘使用率是节点级别的统计（多数据路径可按单盘计算），不是分片级。",
+    "evidence": [],
+    "failureMode": "SCOPE_MISMATCH",
+    "temptingEvidence": [
+      {
+        "docName": "elasticsearch-cluster-health.md",
+        "titlePath": "elasticsearch-cluster-health.md > 1.2. 磁盘水位三阶段",
+        "chunkId": "399824aa-8fff-4c9b-8208-d612b291fb24-c0003",
+        "contentHash": "a14f7aabd0600de7",
+        "page": null
+      }
+    ],
+    "missingRequirement": "节点级 vs 分片级范围混淆。"
+  },
+  {
+    "question": "Kafka 消费位移默认自动提交吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "语料讲位移存储在 __consumer_offsets，没有 enable.auto.commit 的默认值。",
+    "evidence": [],
+    "failureMode": "MISSING_CONDITION",
+    "temptingEvidence": [
+      {
+        "docName": "kafka-consumer-groups.md",
+        "titlePath": "kafka-consumer-groups.md > 1.1. 消费者组的核心规则",
+        "chunkId": "af1f9d72-3889-44cd-a72f-4d1a4ff9bbf1-c0002",
+        "contentHash": "bc847cc41365cec1",
+        "page": null
+      }
+    ],
+    "missingRequirement": "文档没覆盖自动提交配置，问题缺前提。"
+  },
+  {
+    "question": "Redis 在默认配置下用的是 RDB 还是 AOF？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "referenceAnswer": "语料列出持久化选项与 each 策略默认，但没有讲「默认启用哪种持久化方式」的总体配置。",
+    "evidence": [],
+    "failureMode": "MISSING_CONDITION",
+    "temptingEvidence": [
+      {
+        "docName": "redis-persistence.md",
+        "titlePath": "redis-persistence.md > 1.1. 持久化方式概览",
+        "chunkId": "bfc99812-f011-487d-85fa-382290ad273d-c0002",
+        "contentHash": "9512839b7ca5b0a9",
+        "page": null
+      }
+    ],
+    "missingRequirement": "「默认配置下」这个条件语料未覆盖。"
+  },
+  {
+    "question": "ES 磁盘水位恢复后索引块会自动释放（旧版本行为）吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "failureMode": "VERSION_CONFLICT",
+    "referenceAnswer": "语料明确：磁盘恢复后只读块不会自动解除，必须手动恢复（PUT /<索引名>/_settings 置 null）。把『会自动释放』当成现行行为与语料不符。",
+    "evidence": [],
+    "temptingEvidence": [
+      {
+        "docName": "elasticsearch-cluster-health.md",
+        "titlePath": "elasticsearch-cluster-health.md > 1.3. 磁盘超限的处理步骤",
+        "chunkId": "399824aa-8fff-4c9b-8208-d612b291fb24-c0004",
+        "contentHash": "fce6668867ccef82",
+        "page": null
+      }
+    ],
+    "missingRequirement": "新旧行为混淆：语料描述的是当前 8.x 行为（不自动解除），问题暗示旧行为（自动恢复）。"
+  },
+  {
+    "question": "Redis 现在支持 BGSAVE 与 AOF 重写并发执行吗？",
+    "answerable": false,
+    "category": "CONFUSABLE",
+    "failureMode": "VERSION_CONFLICT",
+    "referenceAnswer": "Redis 2.4 起：避免 RDB 快照与 AOF 重写同时进行——两个后台进程不同时做重磁盘 IO。『支持并发执行』与当前行为不符。",
+    "evidence": [],
+    "temptingEvidence": [
+      {
+        "docName": "redis-persistence.md",
+        "titlePath": "redis-persistence.md > 1.6. RDB 与 AOF 的相互作用",
+        "chunkId": "bfc99812-f011-487d-85fa-382290ad273d-c0008",
+        "contentHash": "978e1b60c2572f25",
+        "page": null
+      }
+    ],
+    "missingRequirement": "2.4 前后的行为差异；问题按旧版本行为提问，必须按 active 行为判定。"
+  }
+]
