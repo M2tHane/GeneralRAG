@@ -87,7 +87,8 @@ Judge 超时/不可用/解析失败                      → JUDGE_DEGRADED（�
 
 - Judge 不看"是否相关"，只判断"**仅凭证据能否完整、明确回答**"：部分证据、同产品不同参数、需要外部知识补全 → 判不可回答。
 - **不存在"高分直答"**：实测部分证据题与可答题的重排分分布完全重叠（两类都有 1.000），任何高分阈值都会漏掉假阳性（数据见 `docs/round4/01-Baseline分析.md`）。
-- 实测效果（72 题专项集 A/B）：**False Answer Rate 47.4% → 10.5%**，False Refusal Rate 0% → 5.9%，检索指标零变化；代价是 Judge 调用率 72.2%、平均 +2.6s。
+- **重排阈值是模型绑定的，不是常量**：R4.1 用 72 题分数分布扫描重校准——`qwen3.7-text-rerank` 可答题 P25≈0.99，旧 0.65 阈值下 baseline 仍有 17 个 FP；`0.75` 在不新增 FRR 的前提下把确定无答案题挡在 Judge 之前（依据与完整扫描表见 `docs/round4/04-R4.1评测与校准.md` §B）。**更换 rerank 模型必须重新扫描**。
+- **同模型 / 同 KB / 同 ground truth（v2 标签）实测**：False Answer Rate **45.95% → 5.41%**（FP 17→2，其中阈值直拒 3 + Judge 拦截 12），FRR 0% → 8.57%（3 题），检索指标零变化；Judge 降级率 0%（P95 4.65s）；E2E P50 +1.8s（Judge 代价）、Overall P95 -2.2s（拒答题免生成长尾）。BadCase 逐题归因与并发冒烟（1/4/8）见 `docs/round4/04-R4.1评测与校准.md`。
 - 判定关闭：`RAG_ANSWERABILITY_ENABLED=false`（退回旧单阈值行为，仅对照用）；Judge 失败策略 `RAG_ANSWERABILITY_FAIL_CLOSED=true` 切换为保守拒答。
 
 **R4.1 工程稳定化**（`docs/round4/03-R4.1稳定化.md`）：
@@ -95,9 +96,11 @@ Judge 超时/不可用/解析失败                      → JUDGE_DEGRADED（�
 - Judge 超时语义单一化：`judge-timeout-seconds` 同时是 HTTP connect/read timeout（模型侧硬取消，无后台孤儿请求；重试关闭）；
 - Judge 与生成使用**同一个 Context 实例**全文（`max-evidence-chars` 已删除，mid-chunk 截断不复存在）；
 - 失败原因四分类可见于调试/评测/日志：TIMEOUT / OVERLOADED / MODEL_ERROR / INVALID_RESPONSE；
+- **Eval 口径修正：Judge 降级（SYSTEM_ERROR）不计入混淆矩阵与拒答正确率**，在 `answerabilityConfusion.degraded` 单独透出——系统故障不得虚假提升 refusal 指标（`EvalFlowIT` 红绿用例守护）；
 - 新增 `AnswerabilityFlowIT`（accept/refuse/malformed/timeout/低分直拒/SSE 契约顺序全覆盖）；
 - 评测数据集支持可选 `history`（V5 迁移，FOLLOW_UP 指代解析；仅用于理解问题，不构成证据）；
-- 标注指南：`docs/eval/answerability-labeling-guide.md`；answerability 数据集 v2（含标签修订与 FOLLOW_UP history）：`docs/eval/eval-answerability-v2-array.json`。
+- 标注指南：`docs/eval/answerability-labeling-guide.md`；answerability 数据集 v2（含标签修订与 FOLLOW_UP history）：`docs/eval/eval-answerability-v2-array.json`；
+- 真实模型并发冒烟脚本：`scripts/smoke_concurrency.py`（SSE 全路径，1/4/8 并发实测：4 内零 OVERLOADED，8 时 6/16 快速降级为预期反压）。
 
 ### 无模型服务时的体验
 
@@ -127,7 +130,7 @@ pnpm build && pnpm start   # http://localhost:3000（/api 由 Next.js rewrites �
 ## 5. 测试
 
 ```bash
-cd rag-server && mvn test        # 200 个测试，含 Testcontainers 集成测试套件（含 AnswerabilityFlowIT）
+cd rag-server && mvn test        # 201 个测试，含 Testcontainers 集成测试套件（含 AnswerabilityFlowIT）
 cd rag-web    && pnpm test       # vitest；pnpm e2e 需前后端同时在线
 ```
 
@@ -135,15 +138,16 @@ cd rag-web    && pnpm test       # vitest；pnpm e2e 需前后端同时在线
 
 **第四轮（Answerability）新增口径限制**
 
-- **Judge 不是真值**：Evidence Judge 会以 ≥0.95 的置信度误判——A/B 后残留 4 个 FP 中 3 个是数据集预期过严、1 个是口径边界，但置信度本身不可作为正确性信号。每次调整后都要人工复核数据集预期标签。
-- **PARTIAL_EVIDENCE 的"完整回答"边界存在口径争议**："证据给出通用措施是否算覆盖逐项问题"没有客观答案；专项集中此类边界题约占 1/6，扩数据集时需先统一口径。
+- **Judge 不是真值**：Evidence Judge 会以 ≥0.95 的置信度误判——R4.1 同 ground truth 评测后仍残留 2 个 FP（都是 PARTIAL_EVIDENCE 语义边界题）与 3 个 FN（2 题 Judge 低置信/严格口径误拒 + 1 题阈值直拒），且 FP 的 Judge 置信度高达 0.90–0.98。置信度本身不可作为正确性信号。每次调整后都要人工复核数据集预期标签。
+- **PARTIAL_EVIDENCE 的"完整回答"边界存在口径争议**："证据给出通用措施是否算覆盖逐项问题"没有客观答案；R4.1 残留 FP 全部属于此类，且 unanswerable 侧有 6 题重排分落在 0.95–1.0——**任何阈值都拦不住，纯指标层面 FAR 无法降到 0**，扩数据集时需先统一口径。
 - **Judge 与生成共用同一模型**（本地单模型约束），判定与生成可能同源偏差；换独立小模型是后续优化点。
-- **Answerability 使 E2E 延迟上升约 1/3**（Judge 平均 2.57s）；对延迟敏感场景可 `RAG_ANSWERABILITY_ENABLED=false` 回退到旧阈值行为。
+- **Answerability 使 E2E P50 上升约 1.8s**（Judge 平均 2.8s）；对延迟敏感场景可 `RAG_ANSWERABILITY_ENABLED=false` 回退到旧阈值行为（P95 反而因拒答题免生成长尾而下降）。
+- **FRR 样本量小**：R4.1 的 FRR 8.57% 仅基于 3/35 题，置信区间宽，不能据此断言恶化程度。
 - **PARTIAL_EVIDENCE 类别（R4）**：`EvalCategory` 新增枚举值，需 V4 迁移；旧客户端若硬编码枚举需同步。
 
 **R4.1 期间发现的外部依赖限制**
 
-- **rerank/embedding 分数语义绑定供应商模型**：DashScope 账号欠费导致 qwen3.7-text-rerank/qwen3.7-text-embedding 不可用，切换 gte-rerank-v2/text-embedding-v4 后重排分分布完全不同——**低分阈值必须随 reranker 模型重新校准**，不能跨模型沿用；更换 embedding 模型必须重建全部 KB 索引（向量空间不一致）。
+- **rerank/embedding 分数语义绑定供应商模型**：DashScope 账号欠费导致 qwen3.7-text-rerank/qwen3.7-text-embedding 不可用，切换 gte-rerank-v2/text-embedding-v4 后重排分分布完全不同（可答题 top1 ≈0.45 vs 原模型 ≈0.99）——**低分阈值必须随 reranker 模型重新校准**（账号恢复后已重校准为 0.75，见 `docs/round4/04-R4.1评测与校准.md` §B）；更换 embedding 模型必须重建全部 KB 索引（向量空间不一致）。
 
 **第二轮引入/变更的口径限制（必读）**
 

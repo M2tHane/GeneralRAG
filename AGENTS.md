@@ -88,10 +88,25 @@ history feeds prompt/judge coreference zones only, never evidence, retrieval sti
 the current question only. Labeling guide `docs/eval/answerability-labeling-guide.md`
 + dataset v2 (`eval-answerability-v2-array.json`: 3 label fixes 59/60/70 per guide,
 all 6 residual R4 FP/FN re-audited, SYSTEM_ERROR=0). **OpenAPI `HIGH_CONFIDENCE_ACCEPT`
-removed** (V4 migration comment left immutable; type never emitted). Full re-eval and
-real-model concurrency smoke **blocked**: both DashScope accounts in Arrearage — also
-proved rerank score semantics are model-bound (gte-rerank-v2 ≈0.45 vs qwen3.7-text-rerank
-≈0.9+ on answerable items), so the 0.65 low threshold must be recalibrated per reranker.
+removed** (V4 migration comment left immutable; type never emitted).
+**R4.1 evaluation loop CLOSED (2026-09-16, accounts recovered)** — full details in
+`docs/round4/04-R4.1评测与校准.md`: R4 models restored (qwen3.7-text-embedding /
+qwen3.7-text-rerank / deepseek-v4-flash-0731), KB rebuilt on the original embedding
+(7 docs / 44 chunks, baseline v1-label run reproduces R4's numbers digit-for-digit:
+TP34/FP18/FN0/TN20, Hit@1 0.8824, MRR 0.9363); rerank threshold re-swept over the
+72-item score distribution → **0.75 replaces 0.65** (0.65 still leaked 17 threshold-FPs;
+0.75 adds 3 correct direct refusals without new FRR — full sweep table §B); same-ground-
+truth comparison (v2 labels, same KB/models/params): **FAR 45.95% → 5.41% (FP 17→2),
+FRR 0% → 8.57% (3 items), retrieval metrics unchanged, Judge degraded-rate 0%**;
+bad-case attribution: 12 of 17 baseline FPs caught by the judge, 2 residual FPs are
+PARTIAL_EVIDENCE boundary items (judge conf 0.90–0.98 — confidence is not correctness),
+0 FOLLOW_UP resolution errors across all 6 history items. Eval semantics fixed: judge-
+degraded items are **excluded from the confusion matrix and refusalAccuracy** (system
+failure must not inflate refusal metrics) and surfaced per decisionType in
+`answerabilityConfusion.degraded` (red/green guarded in EvalFlowIT). Real-model
+concurrency smoke (`scripts/smoke_concurrency.py`, SSE full path): concurrency 1/4 →
+zero OVERLOADED; concurrency 8 → 6/16 fast OVERLOADED degradations = expected
+backpressure, no failed requests; do NOT raise the semaphore to mask it.
 The system is a locally runnable, measurably effective RAG:
 ingestion (pdf/md/txt/**docx/xlsx/csv**; xlsx/csv+STRUCTURE → spreadsheet-aware chunking;
 PDF parser selectable `pdfbox|mineru` via `rag.ingestion.pdf-parser`) →
@@ -105,11 +120,16 @@ answerability confusion matrix + two-run comparison with comparability guard).
   enumeration + why highThreshold was rejected), `02-实施记录.md` (final architecture, threshold
   provenance, A/B table, residual FP/FN per item, limitations), `03-R4.1稳定化.md`
   (stabilization: judge concurrency/timeout semantics/evidence consistency/FlowIT/contract/
-  FOLLOW_UP history/label guide + the external-blocker record)
+  FOLLOW_UP history/label guide), `04-R4.1评测与校准.md` (closed loop: model restoration,
+  KB rebuild, baseline reproduction, threshold sweep → 0.75, R4 vs R4.1 on same ground truth,
+  bad-case attribution, concurrency smoke)
 - Round-4 eval material: `docs/eval/eval-answerability-v1-array.json` (72 items, contentHash
   anchors; generator `scripts/gen-answerability-dataset.py`), **v2**: `docs/eval/eval-answerability-v2-array.json`
   (labels fixed per guide + FOLLOW_UP history), guide `docs/eval/answerability-labeling-guide.md`;
-  KB `b78b6fb8` (7 docs / 44 chunks; re-embedded on text-embedding-v4 during R4.1)
+  comparison KB `1aab239e` (7 docs / 44 chunks, original qwen3.7-text-embedding — the
+  authoritative comparable KB; old `b78b6fb8` holds text-embedding-v4 vectors, not comparable);
+  runIds: baseline-v1 b00b513d, baseline-v2 7df5db44, R4.1 2decd02e (threshold 0.75);
+  smoke script `scripts/smoke_concurrency.py` (SMOKE_KB_ID env selects the KB)
 - Round-3 records: `docs/round3/01-实施记录-P1.md`, `02-实施记录-P2.md`, `03-实施记录-P3.md`,
   `04-实施记录-R4Excel.md`
 - Scanned-PDF sample for retesting: `docs/eval-corpus/redis-scanned.pdf` (image-only, no text layer)
@@ -119,7 +139,7 @@ answerability confusion matrix + two-run comparison with comparability guard).
 - Progress & round-3 plan: `docs/round2/03-进度与第三轮计划.md`
 - Round-2 implementation record: `docs/round2/02-实施记录.md`
 - Round-1 handoff: `docs/HANDOFF.md`
-- Test counts cited anywhere: backend 200 (`mvn test`), frontend 30 (vitest). Re-verify before relying on them.
+- Test counts cited anywhere: backend 201 (`mvn test`), frontend 30 (vitest). Re-verify before relying on them.
 
 **Dead config watch**: `rag.retrieval.refusal.insufficient-threshold` / `RAG_REFUSAL_THRESHOLD`
 were dead keys (removed in R4). Refusal thresholds are `rerank-threshold` /
@@ -128,14 +148,15 @@ removed in R4.1 (judge now gets the full shared Context — do not reintroduce p
 truncation). Do not reintroduce undocumented keys.
 
 **Remaining scope** (direction only; user approval per material step):
-finish the blocked R4.1 eval re-run after the DashScope accounts recover (baseline → threshold
-recalibration for gte-rerank-v2 → R4.1 run → concurrency smoke; checklist in
-`docs/round4/03-R4.1稳定化.md` §8), second corpus per new format, reliability hardening (P4),
+second corpus per new format, reliability hardening (P4),
 structured Excel retrieval (row-level ES fields + filter/range queries) driven by real
 BadCase attribution, code-file format support. Label re-audit of answerability-v1 is DONE
-(v2 dataset + guide). Query Rewrite / Parent-Child / Metadata Filter /
-GraphRAG have **no Bad Case support yet** (Hit@3=1.0; all R4 Bad Cases were in the judging /
-generation layer) — do not add them without new evidence.
+(v2 dataset + guide); R4.1 eval loop is CLOSED (04 report). Remaining R4.1-observed
+candidates for future rounds: judge model separate from generation (2 residual
+PARTIAL_EVIDENCE FPs at conf 0.90–0.98), PARTIAL_EVIDENCE guideline refinement.
+Query Rewrite / Parent-Child / Metadata Filter /
+GraphRAG have **no Bad Case support yet** (Hit@3=0.9429 residual is boundary chunking,
+not recall) — do not add them without new evidence.
 
 ## Lessons learned (bind future rounds)
 
@@ -181,6 +202,15 @@ These were paid for in rounds 1–4. Treat them as constraints, not suggestions:
     text (fragile). Since V4, `eval_run_item` stores `refused` + decision type/confidence/reason/
     degraded/latency so FP/FN can be reproduced and attributed (recall error? ranking? evidence?
     judge? generation?).
+12. **System failure is not a decision.** R4's eval counted judge-degraded items (timeout etc.)
+    as refused → under failClosed=true every outage inflated "correct refusal". Fixed in R4.1:
+    degraded items are excluded from the confusion matrix and surfaced separately. Same rule
+    applies to ANY metric that aggregates system outcomes: partition by failure mode first.
+13. **Thresholds are model-bound calibrations, not constants.** The 0.65 rerank threshold was
+    valid for one model version; swapping rerankers (even within one vendor) shifted the
+    answerable distribution wholesale (P25 0.99 vs 0.45). Every reranker change requires a
+    full score-distribution sweep before any comparison is meaningful, and embedding changes
+    require rebuilding every KB (vector spaces are incompatible).
 
 ## Supie Dev stage discipline
 

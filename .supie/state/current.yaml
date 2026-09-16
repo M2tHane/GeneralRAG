@@ -3,71 +3,89 @@
   "flow": "supie-dev",
   "mode": "standard",
   "status": "completed",
-  "goal": "R4.1 Answerability Stabilization：Judge 并发/超时语义/Evidence 一致性 + FlowIT + 契约对齐 + FOLLOW_UP history + 标签复核",
-  "baseline": "r4-completed (git da6b74e..0948dde 4 commits + docs; R4 push 7f38355)",
+  "goal": "R4.1 评测闭环：恢复 R4 原模型 → KB 重建 → baseline 复现 → threshold sweep → R4.1 eval → 同 ground truth 对比 → BadCase 归因 → 并发冒烟 → 报告",
+  "baseline": "r41-stabilization-complete (ace1039 语义修复; 报告 03/04)",
   "current_stage": 6,
   "stages": {
     "1": {
       "status": "completed",
       "approved": true,
-      "note": "用户以 26 节需求直接下达 R4.1 目标与边界（无新 RAG 能力，8 步顺序）"
+      "note": "用户以 16 节需求下达评测闭环（恢复原模型/可比 KB/baseline/sweep/R4.1 eval/BadCase/冒烟/Stop Condition）"
     },
     "2": {
       "status": "skipped",
-      "note": "无新页面/旅程（复用既有评测/调试/前端 stage 行）"
+      "note": "无 UI 变更"
     },
     "3": {
       "status": "completed",
       "approved": true,
-      "note": "openapi 删 HIGH_CONFIDENCE_ACCEPT + history 字段说明；OpenApiDriftTest 绿"
+      "note": "无契约变更（answerabilityConfusion.degraded 为 metrics 内新增字段，走既有自由结构）"
     },
     "5": {
-      "status": "completed",
-      "note": "V5__eval_dataset_item_history.sql 已应用（flyway v5）"
+      "status": "skipped",
+      "note": "无 schema 变更（V5 已于上一段应用）"
     },
     "6": {
       "status": "completed",
-      "note": "4 个逻辑 commit（da6b74e/4563b29/abbe87b/0948dde）+ guide/v2 数据集/文档；mvn 200×2 / 前端 30 / lint / build 全绿"
+      "note": "commit ace1039（Eval SYSTEM_ERROR 语义修复，红→绿）+ aa2fcde（冒烟脚本）+ docs/round4/04 报告 + README/AGENTS 更新；KB 1aab239e（7 docs/44 chunks，qwen3.7-text-embedding）"
     }
   },
   "verification": [
     {
-      "label": "r41-backend-tests",
+      "label": "r41-models-restored",
       "result": "pass",
-      "at": "2026-09-16T01:45:00+08:00",
-      "command": "mvn test ×2 → 200/200（含 AnswerabilityFlowIT 7、policy 14、judge 17、parser 17、OpenApiDriftTest）"
+      "at": "2026-09-16T10:55:00+08:00",
+      "command": "最小探活三连 200：qwen3.7-text-embedding(469ms,1024d)/deepseek-v4-flash-0731(1179ms)/qwen3.7-text-rerank(195ms,0.827 vs 0.008)"
     },
     {
-      "label": "r41-frontend",
+      "label": "r41-comparable-kb",
       "result": "pass",
-      "at": "2026-09-16T01:47:00+08:00",
-      "command": "pnpm test 30/30; pnpm lint 0 warning; pnpm build 9 路由"
+      "at": "2026-09-16T11:08:00+08:00",
+      "command": "KB 1aab239e 用原 embedding 重建：7 docs/44 chunks（与 R4 b78b6fb8 结构一致），ES 计数验证"
     },
     {
-      "label": "r41-flowit",
+      "label": "r41-baseline-reproduction",
       "result": "pass",
-      "at": "2026-09-16T01:40:00+08:00",
-      "command": "AnswerabilityFlowIT 7/7：accept/refuse/malformed/timeout(硬取消+名额释放)/low-score/SSE 契约/准备"
+      "at": "2026-09-16T11:26:00+08:00",
+      "command": "run b00b513d（v1 标签，answerability=false）：TP34/FP18/FN0/TN20、Hit@1 0.8824、MRR 0.9363 —— 与 R4 原始 A/B 逐位一致"
     },
     {
-      "label": "r41-v5-migration",
+      "label": "r41-baseline-v2-labels",
       "result": "pass",
-      "at": "2026-09-16T01:11:36+08:00",
-      "command": "flyway: Migrating schema to version 5 - eval dataset item history; column verified via SHOW COLUMNS"
+      "at": "2026-09-16T11:32:00+08:00",
+      "command": "run 7df5db44（v2 标签）：TP35/FP17/FN0/TN20、FAR 45.95%、Hit 指标 v1→v2 差异纯由标签口径解释"
     },
     {
-      "label": "r41-kb-reembed",
+      "label": "r41-threshold-sweep",
       "result": "pass",
-      "at": "2026-09-16T01:16:00+08:00",
-      "command": "KB b78b6fb8 重建：7 docs/44 chunks 全 COMPLETED（text-embedding-v4 重嵌入 + gte-rerank-v2）"
+      "at": "2026-09-16T11:40:00+08:00",
+      "command": "72 题重排分布扫描（debug 接口，0.10–0.92 共 30+ 档）：选定 0.75（FP 17→14 直拒、不新增 FRR、0.65–0.75 边际题逐一核对）；FAR≤3% 不可达（PARTIAL_EVIDENCE@1.0 结构性存在）已如实记录"
     },
     {
-      "label": "r41-eval-rerun",
-      "result": "blocked",
-      "at": "2026-09-16T01:32:00+08:00",
-      "command": "BLOCKED: DashScope 两账号 Arrearage（chat/embedding/rerank 全 403）。run 8fbe8cc9 数据残缺不可用。恢复后清单见 docs/round4/03-R4.1稳定化.md §8"
+      "label": "r41-eval-run",
+      "result": "pass",
+      "at": "2026-09-16T11:49:00+08:00",
+      "command": "run 2decd02e（0.75+Answerability，v2 标签）：TP32/FP2/FN3/TN35、FAR 5.41%、FRR 8.57%、Judge 降级 0%、degraded 明细 {}、LOW_SCORE_REFUSAL 24、JUDGE_ACCEPT 34、JUDGE_REFUSE 14"
+    },
+    {
+      "label": "r41-semantics-fix",
+      "result": "pass",
+      "at": "2026-09-16T11:14:00+08:00",
+      "command": "EvalFlowIT#judgeSystemErrorExcludedFromConfusionMatrix 红（旧实现 tp=1 污染）→ 绿（6/6）；degraded 出格+明细透出"
+    },
+    {
+      "label": "r41-concurrency-smoke",
+      "result": "pass",
+      "at": "2026-09-16T11:56:00+08:00",
+      "command": "真实模型 SSE 全路径 ×2 轮：conc1/4 零 OVERLOADED；conc8 6/16 快速降级（预期反压，0 失败 0 超时）；P50 4.0–4.7s；脚本 scripts/smoke_concurrency.py"
+    },
+    {
+      "label": "r41-regression",
+      "result": "pass",
+      "at": "2026-09-16T12:00:00+08:00",
+      "command": "mvn test ×2 连续 201/201；pnpm test 30/30；pnpm lint 0 警告；pnpm build 9 路由"
     }
   ],
-  "started_at": "2026-09-15T22:00:00+08:00",
-  "updated_at": "2026-09-15T23:55:00+08:00"
+  "started_at": "2026-09-16T10:45:00+08:00",
+  "updated_at": "2026-09-16T12:00:00+08:00"
 }
