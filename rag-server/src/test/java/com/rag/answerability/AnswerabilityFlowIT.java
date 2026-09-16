@@ -140,8 +140,12 @@ class AnswerabilityFlowIT {
         // top1 分块完全同向（cos=1.0 → score=1.0 ≥ 0.90 → 必进 Judge），而低分问题
         // （无关字符串）经逐维混合去相关后 score < 0.90 → LOW_SCORE_REFUSAL。
         // 正文仍是 DOC_CHUNK，case1 的回答/引用断言不受影响。
+        // R5-A：retrievalContent 携带仅供检索的元数据 marker——case8 验证它绝不
+        // 泄漏进 Judge/Generation/Citation 回答通道
         esChunkIndex.rebuildChunks(docId, kbId,
-                List.of(new ChunkDoc(docId + "-c0000", "answerability-it 文档 > 回调配置", null, 0, 12, DOC_CHUNK)),
+                List.of(new ChunkDoc(docId + "-c0000", "answerability-it 文档 > 回调配置",
+                        null, 0, 12, DOC_CHUNK,
+                        "文档：internal-secret-title\n\n" + DOC_CHUNK)),
                 List.of(FakeOpenAiServer.embedVector(HIGH_SCORE_QUESTION)));
     }
 
@@ -300,6 +304,36 @@ class AnswerabilityFlowIT {
         assertThat(contents.stream().anyMatch(c -> c.contains(DOC_CHUNK) && c.contains("【当前问题】")))
                 .as("Judge 用户消息应包含与生成同源的证据全文与当前问题").isTrue();
         assertThat(judgePrompt.isEmpty() || judgePrompt.contains("证据充分性")).isTrue();
+    }
+
+    /**
+     * R5-A 防 evidence 污染：retrievalContent 中的检索增强元数据（"文档：internal-secret-title"）
+     * 绝不能泄漏进 Judge evidence / Generation context / Citation——检索通道
+     * （Embedding/BM25/Reranker）与回答通道（answerContent）严格分离。
+     */
+    @Test
+    @Order(8)
+    void retrievalContentMetadataNeverLeaksIntoAnswerPath() {
+        fakeModel.resetNonStreamCounters();
+        fakeModel.setNonStreamAnswer("{\"answerable\": true, \"confidence\": 0.9, \"reason\": \"证据含回调超时\"}");
+        fakeModel.setChatAnswer("依据文档，支付回调确认超时为 5 秒。");
+
+        SseCollector collector = stream(HIGH_SCORE_QUESTION);
+        assertThat(collector.awaitTerminal(20)).isTrue();
+        assertThat(collector.errorEvents).isEmpty();
+
+        String marker = "internal-secret-title";
+        // Generation context：chat prompt（流式请求的 messages）不得含检索元数据
+        assertThat(fakeModel.lastChatPrompts().stream().anyMatch(c -> c.contains(marker)))
+                .as("Generation/Judge prompt 不得出现 retrievalContent 元数据").isFalse();
+        // Citation 字段（docName/titlePath）不得含元数据；citation 本就不含正文
+        assertThat(collector.citationsPayload.stream()
+                        .flatMap(c -> c.values().stream())
+                        .map(String::valueOf)
+                        .anyMatch(v -> v.contains(marker)))
+                .as("Citation 不得出现 retrievalContent 元数据").isFalse();
+        // 回答照常
+        assertThat(collector.generatedText).contains("5 秒");
     }
 
     // ------------------------------------------------------------------

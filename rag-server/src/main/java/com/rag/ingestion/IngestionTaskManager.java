@@ -81,6 +81,7 @@ public class IngestionTaskManager {
     private final com.rag.ingestion.chunk.SpreadsheetChunker spreadsheetChunker =
             new com.rag.ingestion.chunk.SpreadsheetChunker();
     private final EmbeddingGateway embeddingGateway;
+    private final com.rag.ingestion.chunk.RetrievalContentEnricher retrievalContentEnricher;
     private final java.util.concurrent.ExecutorService executor;
 
     public IngestionTaskManager(IngestionTaskRepository taskRepository,
@@ -90,6 +91,7 @@ public class IngestionTaskManager {
                                 ParserRouter parserRouter,
                                 List<Chunker> chunkerList,
                                 EmbeddingGateway embeddingGateway,
+                                com.rag.ingestion.chunk.RetrievalContentEnricher retrievalContentEnricher,
                                 RagProperties ragProperties) {
         this.taskRepository = taskRepository;
         this.documentRepository = documentRepository;
@@ -105,6 +107,7 @@ public class IngestionTaskManager {
             }
         }
         this.embeddingGateway = embeddingGateway;
+        this.retrievalContentEnricher = retrievalContentEnricher;
         this.executor = java.util.concurrent.Executors.newFixedThreadPool(
                 ragProperties.getIngestion().getWorkerThreads(), runnable -> {
                     Thread thread = new Thread(runnable, "rag-ingestion-" + POOL_SEQUENCE.incrementAndGet());
@@ -295,8 +298,16 @@ public class IngestionTaskManager {
                 ? spreadsheetChunker.chunk(parsed, cfg, doc.getId())
                 : chunkerFor(cfg.strategy()).chunk(parsed, cfg, doc.getId());
         doc.setChunkCount(drafts.size());
-        ctx.drafts = drafts;
-        log.info("CHUNKING 完成（docId={}, chunks={}）", doc.getId(), drafts.size());
+        // R5-A：为每个 chunk 生成检索增强表示（确定性元数据前缀）。
+        // answerContent（draft.text）不变——Judge/Generation/Citation 只见原文。
+        List<ChunkDraft> enriched = new ArrayList<>(drafts.size());
+        for (ChunkDraft draft : drafts) {
+            enriched.add(new ChunkDraft(draft.chunkId(), draft.seq(), draft.titlePath(),
+                    draft.page(), draft.charCount(), draft.text(),
+                    retrievalContentEnricher.enrich(draft.text(), draft.titlePath(), parsed.documentName())));
+        }
+        ctx.drafts = enriched;
+        log.info("CHUNKING 完成（docId={}, chunks={}）", doc.getId(), enriched.size());
     }
 
     private void embed(StageContext ctx) {
@@ -304,7 +315,9 @@ public class IngestionTaskManager {
         List<float[]> vectors = new ArrayList<>(drafts.size());
         for (int from = 0; from < drafts.size(); from += EMBED_BATCH_SIZE) {
             int to = Math.min(from + EMBED_BATCH_SIZE, drafts.size());
-            List<String> batch = drafts.subList(from, to).stream().map(ChunkDraft::text).toList();
+            // R5-A：embedding 输入 = retrievalContent（检索增强表示）；无则回退 answerContent
+            List<String> batch = drafts.subList(from, to).stream()
+                    .map(d -> d.retrievalContent() != null ? d.retrievalContent() : d.text()).toList();
             vectors.addAll(embeddingGateway.embed(batch));
         }
         ctx.vectors = vectors;
@@ -315,7 +328,7 @@ public class IngestionTaskManager {
         List<ChunkDoc> chunkDocs = new ArrayList<>(ctx.drafts.size());
         for (ChunkDraft draft : ctx.drafts) {
             chunkDocs.add(new ChunkDoc(draft.chunkId(), draft.titlePath(), draft.page(),
-                    draft.seq(), draft.charCount(), draft.text()));
+                    draft.seq(), draft.charCount(), draft.text(), draft.retrievalContent()));
         }
         esChunkIndex.rebuildChunks(doc.getId(), doc.getKbId(), chunkDocs, ctx.vectors);
     }

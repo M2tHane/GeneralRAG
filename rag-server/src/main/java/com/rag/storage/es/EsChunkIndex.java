@@ -108,6 +108,9 @@ public class EsChunkIndex {
                         .properties("seq", p -> p.integer(i -> i))
                         .properties("char_count", p -> p.integer(i -> i))
                         .properties("content", p -> p.text(t -> t.analyzer(contentAnalyzer)))
+                        // R5-A：检索增强表示（与正文同 analyzer）；旧文档无此字段时
+                        // BM25 回退 content 字段（见 bm25Search）
+                        .properties("retrieval_content", p -> p.text(t -> t.analyzer(contentAnalyzer)))
                         .properties("vector", p -> p.denseVector(d -> d
                                 .dims(vectorDims)
                                 .index(true)
@@ -204,7 +207,12 @@ public class EsChunkIndex {
             SearchResponse<Map> response = client.search(s -> s
                             .index(INDEX_NAME)
                             .query(q -> q.bool(b -> b
-                                    .must(m -> m.match(mt -> mt.field("content").query(question)))
+                                    // R5-A：优先检索增强字段；旧 chunk 无 retrieval_content 时
+                                    // 该子查询自然无命中，content 兜底保证旧数据仍可检索
+                                    .must(m -> m.bool(inner -> inner
+                                            .should(sh -> sh.match(mt -> mt.field("retrieval_content").query(question)))
+                                            .should(sh -> sh.match(mt -> mt.field("content").query(question)))
+                                            .minimumShouldMatch("1")))
                                     .filter(f -> f.term(t -> t.field("knowledge_base_id").value(kbId)))))
                             .size(Math.max(1, topK)),
                     Map.class);
@@ -253,6 +261,10 @@ public class EsChunkIndex {
         source.put("seq", chunk.seq());
         source.put("char_count", chunk.charCount());
         source.put("content", chunk.content());
+        // R5-A：检索表示（null = 旧数据/未启用双层，读侧回退 content）
+        if (chunk.retrievalContent() != null) {
+            source.put("retrieval_content", chunk.retrievalContent());
+        }
         source.put("vector", toFloatList(vector));
         return source;
     }
@@ -264,6 +276,7 @@ public class EsChunkIndex {
         Integer page = (Integer) source.get("page");
         Integer seq = (Integer) source.get("seq");
         Integer charCount = (Integer) source.get("char_count");
+        Object retrievalContent = source.get("retrieval_content");
         return new EsHit(
                 hit.id(),
                 (String) source.get("doc_id"),
@@ -272,6 +285,7 @@ public class EsChunkIndex {
                 seq == null ? 0 : seq,
                 charCount == null ? 0 : charCount,
                 (String) source.get("content"),
+                retrievalContent instanceof String rc ? rc : null,
                 hit.score() == null ? 0.0f : hit.score());
     }
 

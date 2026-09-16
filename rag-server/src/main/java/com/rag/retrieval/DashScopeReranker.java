@@ -74,9 +74,11 @@ public class DashScopeReranker implements Reranker {
             return RerankOutcome.degraded(hits, "问题为空，跳过重排");
         }
         try {
+            // R5-A：reranker 只看检索增强表示（旧数据无 retrieval_content 时回退 answerContent）
             List<String> documents = new ArrayList<>(hits.size());
             for (RetrievalHit hit : hits) {
-                documents.add(truncate(hit.chunk().content()));
+                documents.add(truncate(hit.chunk().retrievalContent() != null
+                        ? hit.chunk().retrievalContent() : hit.chunk().content()));
             }
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("model", cfg.getModelName());

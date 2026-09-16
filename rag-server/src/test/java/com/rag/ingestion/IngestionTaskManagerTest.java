@@ -72,7 +72,7 @@ class IngestionTaskManagerTest {
         manager = new IngestionTaskManager(taskRepository, documentRepository, objectStore,
                 esChunkIndex, parserRouter,
                 List.of(new LengthOverlapChunker(), new StructureChunker()),
-                embeddingGateway, properties);
+                embeddingGateway, new com.rag.ingestion.chunk.RetrievalContentEnricher(), properties);
     }
 
     // ------------------------------------------------------------------
