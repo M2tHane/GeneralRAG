@@ -294,9 +294,10 @@ public class FakeOpenAiServer {
      * 不依赖执行顺序。
      */
     public static float[] embedVector(String text) {
-        // FNV-1a 64：稳定 64 位文本哈希作 PRNG 种子。不用 32 位
+        // FNV-1a-style 64-bit deterministic text hash（逐 Java char 混合，
+        // 非严格标准 FNV-1a 的 byte-based 变体）作 PRNG 种子。不用 32 位
         // String.hashCode()——存在公开碰撞对（"FB"/"Ea"），不同文本会生成
-        // 完全相同的向量。null/空串也是确定的（空字节序列）。
+        // 完全相同的向量。null/空串也是确定的（零次混合 = offset basis）。
         long seed = 0xCBF29CE484222325L; // FNV offset basis
         if (text != null) {
             for (int i = 0, n = text.length(); i < n; i++) {

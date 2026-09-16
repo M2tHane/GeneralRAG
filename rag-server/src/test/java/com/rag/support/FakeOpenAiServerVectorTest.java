@@ -67,7 +67,7 @@ class FakeOpenAiServerVectorTest {
         float[] fb = FakeOpenAiServer.embedVector("FB");
         float[] ea = FakeOpenAiServer.embedVector("Ea");
         assertThat(fb).isNotEqualTo(ea);
-        assertThat(cosine(fb, ea)).as("|cos(FB,Ea)|").isLessThan(0.15);
+        assertThat(Math.abs(cosine(fb, ea))).as("|cos(FB,Ea)|").isLessThan(0.15);
     }
 
     @Test
