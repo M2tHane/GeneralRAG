@@ -24,7 +24,13 @@ public record AnswerabilityDecision(boolean answerable,
                                     long latencyMs) {
 
     public AnswerabilityDecision {
-        if (!degraded) {
+        if (degraded) {
+            // R4.1.2 不变量：degraded 必须携带结构化二级原因——
+            // 否则 Eval 只能落 UNKNOWN，指标口径重新退化
+            if (failureType == null) {
+                throw new IllegalArgumentException("degraded decision requires failureType");
+            }
+        } else {
             failureType = null; // 非 degraded 一律 null，杜绝脏数据
         }
     }

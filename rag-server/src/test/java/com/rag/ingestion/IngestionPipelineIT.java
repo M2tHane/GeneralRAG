@@ -71,7 +71,6 @@ class IngestionPipelineIT extends com.rag.support.SharedInfraSupport {
         if (fakeModel != null) {
             fakeModel.stop();
         }
-        release();
     }
 
     private String newKb() {

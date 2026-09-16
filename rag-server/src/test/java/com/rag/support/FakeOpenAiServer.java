@@ -39,6 +39,12 @@ public class FakeOpenAiServer {
     private volatile long chatDelayMs = 0;
     private volatile long chatTokenDelayMs = 0;
     private final AtomicBoolean chatFailure = new AtomicBoolean(false);
+    /** R4.1.2：前 N 次流式 chat 请求正常、之后全部 500（0 = 关闭，等效 setChatFailure(false)）。 */
+    private final java.util.concurrent.atomic.AtomicInteger chatFailAfter =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+    /** R4.1.2：已收到的流式 chat 请求计数（chatFailAfter 的判定基准）。 */
+    private final java.util.concurrent.atomic.AtomicInteger chatStreamCount =
+            new java.util.concurrent.atomic.AtomicInteger(0);
     private final AtomicBoolean embedFailure = new AtomicBoolean(false);
     /** 供用例读取模型收到了什么 prompt（断言历史/证据分区）。 */
     private final List<String> lastChatPrompts = new ArrayList<>();
@@ -120,6 +126,12 @@ public class FakeOpenAiServer {
             return;
         }
         boolean stream = Boolean.TRUE.equals(req.get("stream"));
+        // R4.1.2：前 N 次流式请求放行、之后 500（仅流式计数；Judge 走非流式不受影响）
+        if (stream && chatFailAfter.get() > 0
+                && chatStreamCount.incrementAndGet() > chatFailAfter.get()) {
+            respond(exchange, 500, Map.of("error", Map.of("message", "chat failure after N (test)")));
+            return;
+        }
         if (chatDelayMs > 0) {
             Thread.sleep(chatDelayMs);
         }
@@ -208,6 +220,15 @@ public class FakeOpenAiServer {
 
     public void setChatFailure(boolean fail) {
         this.chatFailure.set(fail);
+    }
+
+    /** R4.1.2：前 N 次流式生成正常、之后 500（0 = 关闭）；同时重置流式计数。 */
+    public void setChatFailureAfter(int n) {
+        this.chatStreamCount.set(0);
+        this.chatFailAfter.set(n);
+        if (n <= 0) {
+            this.chatFailure.set(false);
+        }
     }
 
     public void setEmbedFailure(boolean fail) {

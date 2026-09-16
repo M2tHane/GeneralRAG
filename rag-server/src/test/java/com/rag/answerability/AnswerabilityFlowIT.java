@@ -108,7 +108,6 @@ class AnswerabilityFlowIT extends SharedInfraSupport {
         if (fakeModel != null) {
             fakeModel.stop();
         }
-        release();
     }
 
     private static String kbId;

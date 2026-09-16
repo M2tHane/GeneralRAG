@@ -33,23 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
-class OpenApiDriftTest {
-
-    private static final MySQLContainer<?> MYSQL = new MySQLContainer<>(DockerImageName.parse("mysql:8"))
-            .withStartupTimeout(java.time.Duration.ofMinutes(5));
-    private static final org.testcontainers.elasticsearch.ElasticsearchContainer ES =
-            new org.testcontainers.elasticsearch.ElasticsearchContainer(
-                    org.testcontainers.utility.DockerImageName.parse("docker.elastic.co/elasticsearch/elasticsearch:8.14.1"))
-                    .withEnv("xpack.security.enabled", "false")
-                    .withEnv("xpack.security.http.ssl.enabled", "false")
-                    .withEnv("ES_JAVA_OPTS", "-Xms512m -Xmx512m")
-                    .withStartupTimeout(java.time.Duration.ofMinutes(6));
-    private static final org.testcontainers.containers.GenericContainer<?> MINIO =
-            new org.testcontainers.containers.GenericContainer<>(DockerImageName.parse("minio/minio:latest"))
-                    .withCommand("server", "/data")
-                    .withExposedPorts(9000)
-                    .waitingFor(new org.testcontainers.containers.wait.strategy.HttpWaitStrategy()
-                            .forPort(9000).forPath("/minio/health/ready").forStatusCode(200));
+class OpenApiDriftTest extends com.rag.support.SharedInfraSupport {
 
     @LocalServerPort
     int port;
@@ -58,15 +42,13 @@ class OpenApiDriftTest {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry registry) {
-        MYSQL.start();
-        MINIO.start();
-        ES.start();
+        acquire();
         registry.add("spring.elasticsearch.uris",
-                () -> "http://" + ES.getHost() + ":" + ES.getMappedPort(9200));
-        registry.add("minio.endpoint", () -> "http://" + MINIO.getHost() + ":" + MINIO.getMappedPort(9000));
-        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
-        registry.add("spring.datasource.username", MYSQL::getUsername);
-        registry.add("spring.datasource.password", MYSQL::getPassword);
+                () -> "http://" + es().getHost() + ":" + es().getMappedPort(9200));
+        registry.add("minio.endpoint", () -> "http://" + minio().getHost() + ":" + minio().getMappedPort(9000));
+        registry.add("spring.datasource.url", mysql()::getJdbcUrl);
+        registry.add("spring.datasource.username", mysql()::getUsername);
+        registry.add("spring.datasource.password", mysql()::getPassword);
         registry.add("minio.access-key", () -> "minioadmin");
         registry.add("minio.secret-key", () -> "minioadmin");
         registry.add("minio.bucket", () -> "drift");

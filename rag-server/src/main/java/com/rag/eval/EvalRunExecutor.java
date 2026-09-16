@@ -189,6 +189,9 @@ public class EvalRunExecutor {
         // 一次 Judge 调用尝试，不能从分母里消失。
         int executedCount = 0;
         int evaluatedCount = 0;
+        // R4.1.2：attempted = 实际进入执行循环（明细行存在）的题数；
+        // 关系链 attempted ≥ executed ≥ evaluated
+        int attemptedCount = 0;
         int refusalCorrect = 0;
         int judgeInvokedCount = 0;
         int judgeDegradedCount = 0;
@@ -214,6 +217,7 @@ public class EvalRunExecutor {
                 log.warn("评测明细行缺失，跳过（runId={}, seq={}）", run.getId(), item.getSeq());
                 continue;
             }
+            attemptedCount++;
             long start = System.currentTimeMillis();
             List<RetrievalHit> hits;
             ChatStreamService.AnswerResult answer = null;
@@ -338,7 +342,8 @@ public class EvalRunExecutor {
                     runItem.setAnswerabilityLatencyMs(toIntMs(dec.latencyMs()));
                     if (dec.degraded()) {
                         judgeDegradedCount++;
-                        // R4.1.1：结构化 failureType 计数（不再依赖 reason 文本前缀）
+                        // R4.1.2：invariant 保证 degraded 必有 failureType（新代码路径
+                        // 不会产生 UNKNOWN）；此 null 分支仅为兼容历史行数据的防御性兜底
                         String type = dec.failureType() == null ? "UNKNOWN" : dec.failureType().name();
                         degradedByType.merge(type, 1, Integer::sum);
                     }
@@ -350,8 +355,14 @@ public class EvalRunExecutor {
             }
             runItemRepository.save(runItem);
 
-            totalLatency += latencyMs;
-            latencies.add(latencyMs);
+            // R4.1.2：延迟统计只收"成功执行的题"——executionFailed 的耗时（通常是一次
+            // 异常快速失败，也可能是一次漫长超时）混入会扭曲 avg/P50/P95 口径，
+            // 且分母 executedCount 本就不含它们。retrievalMs/generationMs 天然只在
+            // answer != null（即执行成功）时累计，与此守卫保持同一集合。
+            if (!executionFailed) {
+                totalLatency += latencyMs;
+                latencies.add(latencyMs);
+            }
         }
 
         latencies.sort(null);
@@ -378,6 +389,8 @@ public class EvalRunExecutor {
         // 在 degraded 出现时会与数据集标签集合不一致）
         metrics.put("outOfKbCount", outOfKbCount);
         // R4.1.1：执行/判定分母分离（口径见 executeItems 注释）
+        // R4.1.2：attemptedCount = 进入执行循环的题数；链路 attempted ≥ executed ≥ evaluated
+        metrics.put("attemptedCount", attemptedCount);
         metrics.put("executedCount", executedCount);
         metrics.put("evaluatedCount", evaluatedCount);
         // R4：Answerability 混淆矩阵（逐题累计：TP=应答且答 FP=不应答却答 FN=应答却拒 TN=不应答且拒；
@@ -385,22 +398,25 @@ public class EvalRunExecutor {
         metrics.put("answerabilityConfusion", confusionMetrics(executedCount, evaluatedCount,
                 judgeInvokedCount, judgeDegradedCount, judgeLatencySum, categoryStats,
                 tpCount, fpCount, fnCount, tnCount, degradedByType));
-        // R2-L1：耗时拆分与分位数
+        // R2-L1：耗时拆分与分位数——统计集合 = 成功执行的题（R4.1.2 守卫），
+        // 分母 executedCount 与集合一致
         metrics.put("avgLatencyMs", executedCount == 0 ? null : round4((double) totalLatency / executedCount));
         metrics.put("retrievalMsAvg", executedCount == 0 ? null : round4((double) totalRetrieval / executedCount));
         metrics.put("generationMsAvg", executedCount == 0 ? null : round4((double) totalGeneration / executedCount));
         metrics.put("latencyP50Ms", percentile(latencies, 0.50));
         metrics.put("latencyP95Ms", percentile(latencies, 0.95));
         metrics.put("latencyMaxMs", latencies.isEmpty() ? null : latencies.get(latencies.size() - 1));
+        // itemCount：R4.1.2 前的历史字段，语义 = 成功执行数（= executedCount），保留兼容；
+        // 新口径请使用 attemptedCount / executedCount / evaluatedCount
         metrics.put("itemCount", executedCount);
 
         run.setStatus(EvalRunStatus.COMPLETED);
         run.setMetrics(metrics);
         run.setFinishedAt(java.time.LocalDateTime.now());
         runRepository.save(run);
-        log.info("评测运行完成 runId={} itemCount={} executed={} evaluated={} answerable={} "
+        log.info("评测运行完成 runId={} attempted={} executed={} evaluated={} answerable={} "
                         + "hitAt1={} hitAt3={} hitAt5={} recallAt5={} mrr={} refusalAcc={}",
-                run.getId(), executedCount, executedCount, evaluatedCount, answerableCount,
+                run.getId(), attemptedCount, executedCount, evaluatedCount, answerableCount,
                 metrics.get("hitAt1"), metrics.get("hitAt3"), metrics.get("hitAt5"),
                 metrics.get("recallAt5"), metrics.get("mrr"), metrics.get("refusalAccuracy"));
     }

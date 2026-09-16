@@ -38,6 +38,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 /**
  * 评测全链路集成测试（Task 6，Testcontainers + FakeOpenAiServer）。
@@ -90,7 +91,6 @@ class EvalFlowIT extends SharedInfraSupport {
         if (fakeModel != null) {
             fakeModel.stop();
         }
-        release();
     }
 
     // ------------------------------------------------------------------
@@ -254,6 +254,7 @@ class EvalFlowIT extends SharedInfraSupport {
     @Test
     @Order(5)
     void reviewTagPersists() {
+        // 共享容器（R4.1.2）：按 runId 过滤本套件数据，不依赖全表为空
         EvalRunItemEntity item = runItemRepository.findAll().stream()
                 .filter(i -> i.getRunId().equals(runId.toString()))
                 .findFirst().orElseThrow();
@@ -401,6 +402,74 @@ class EvalFlowIT extends SharedInfraSupport {
         assertThat(String.valueOf(item.get("answerabilityDecisionType")))
                 .isIn("JUDGE_ACCEPT", "JUDGE_REFUSE");
         assertThat(item.get("refused")).isEqualTo(Boolean.FALSE);
+    }
+
+    /**
+     * R4.1.2 统计口径：executionFailed 题（此处注入 chat 500 → answerOnce 抛异常）
+     * 计入 attemptedCount 但不计入 executedCount，其耗时不得进入延迟统计集合
+     * （avg/P50/P95 的分母与样本都必须只来自成功执行的题）。
+     *
+     * <p>构造：2 题，item1 正常、item2 执行失败。item1 的 latency 为真实成功耗时
+     * （≫0）；item2 失败耗时通常极小——若失败耗时混入，样本数会变成 2 而非 1。
+     * 用 latencies 集合大小 = executedCount 语义验证：P50 与 avg 都应来自 item1，
+     * 且 P50 ≈ avg（单样本集合），绝不出现"两样本均值"形态。</p>
+     */
+    @Test
+    @Order(8)
+    void executionFailedItemsExcludedFromLatencyMetrics() {
+        String json = """
+                [
+                  {"question":"支付回调确认超时是多少？","referenceAnswer":"5 秒",
+                   "answerable":true,"category":"DIRECT",
+                   "evidence":[{"docName":"%s","titlePath":"%s"}]},
+                  {"question":"签名算法是什么？","referenceAnswer":"HMAC-SHA256",
+                   "answerable":true,"category":"TERM_VARIATION",
+                   "evidence":[{"docName":"%s","titlePath":"支付接口文档 > 签名算法"}]}
+                ]
+                """.formatted(DOC_NAME, DOC_TITLE_PATH, DOC_NAME);
+        EvalService.EvalDatasetView ds = evalService.importDataset(
+                multipartFile(json, "延迟口径集.json"), "eval-it-延迟口径", DatasetType.TUNING);
+
+        fakeModel.resetNonStreamCounters();
+        // Judge 放行（合法 JSON）；生成端先正常后 500 —— chatFailure 对所有 chat 请求生效，
+        // 但 eval 逐题串行执行，本题集只有 seq2 的生成请求会落在 failure=true 窗口后
+        fakeModel.setNonStreamAnswer("{\"answerable\": true, \"confidence\": 0.9, \"reason\": \"ok\"}");
+        fakeModel.setNonStreamFailure(false);
+        fakeModel.setChatAnswer("依据文档，支付回调确认超时为 5 秒。");
+        fakeModel.setChatFailureAfter(1); // 第 1 次流式生成后，后续 chat 请求全部 500
+
+        try {
+            EvalRunEntity run = evalService.createRun(UUID.fromString(ds.id()),
+                    UUID.fromString(ds.latestVersion().versionId()),
+                    UUID.fromString(kbId), null, null);
+            evalService.runSync(UUID.fromString(run.getId()));
+            EvalRunEntity finished = evalService.getRun(UUID.fromString(run.getId()));
+            assertThat(finished.getStatus()).isEqualTo(EvalRunStatus.COMPLETED);
+
+            Map<String, Object> metrics = finished.getMetrics();
+            assertThat(metrics.get("attemptedCount")).isEqualTo(2);
+            assertThat(metrics.get("executedCount")).isEqualTo(1);
+            assertThat(metrics.get("evaluatedCount")).isEqualTo(1);
+
+            // 失败题不得进入延迟集合：单成功样本下 P50 = max = avg（同一值的整数毫秒）
+            Number p50 = (Number) metrics.get("latencyP50Ms");
+            Number max = (Number) metrics.get("latencyMaxMs");
+            Number avg = (Number) metrics.get("avgLatencyMs");
+            assertThat(max.doubleValue()).isEqualTo(p50.doubleValue());
+            // avg 与 P50 来自同一个样本（round4 只影响小数位）
+            assertThat(avg.doubleValue()).isCloseTo(p50.doubleValue(), within(0.5));
+
+            // 失败题落库可辨识
+            EvalRunViewService.ItemPage items = runViewService.listItems(finished, 1, 10);
+            assertThat(items.total()).isEqualTo(2);
+            Map<String, Object> failedItem = items.items().stream()
+                    .filter(i -> i.get("generatedAnswer") == null)
+                    .findFirst().orElseThrow();
+            assertThat(String.valueOf(failedItem.get("reviewNote"))).contains("执行失败");
+        } finally {
+            fakeModel.setChatFailureAfter(0); // 解除故障注入，避免污染后续用例
+            fakeModel.setChatFailure(false);
+        }
     }
 
     private static MockMultipartFile multipartFile(String content, String fileName) {

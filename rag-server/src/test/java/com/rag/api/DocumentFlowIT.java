@@ -76,7 +76,6 @@ class DocumentFlowIT extends SharedInfraSupport {
         if (fakeModel != null) {
             fakeModel.stop();
         }
-        release();
     }
 
     /**
