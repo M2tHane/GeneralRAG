@@ -61,6 +61,25 @@ class FakeOpenAiServerVectorTest {
     }
 
     @Test
+    void hashCollisionDoesNotCollapseVectors() {
+        // 公开的 32 位 hashCode 碰撞对：seed 用 hashCode 时两文本向量完全相同
+        assertThat("FB".hashCode()).isEqualTo("Ea".hashCode());
+        float[] fb = FakeOpenAiServer.embedVector("FB");
+        float[] ea = FakeOpenAiServer.embedVector("Ea");
+        assertThat(fb).isNotEqualTo(ea);
+        assertThat(cosine(fb, ea)).as("|cos(FB,Ea)|").isLessThan(0.15);
+    }
+
+    @Test
+    void nullAndEmptyTextsAreDeterministic() {
+        assertThat(FakeOpenAiServer.embedVector(null))
+                .containsExactly(FakeOpenAiServer.embedVector(null));
+        assertThat(FakeOpenAiServer.embedVector(""))
+                .containsExactly(FakeOpenAiServer.embedVector(""));
+        assertThat(norm(FakeOpenAiServer.embedVector(null))).isCloseTo(1.0, within(EPS));
+    }
+
+    @Test
     void esCosineScoreMarginsHold() {
         // ES cosine score = (1+cos)/2：同文 ≈1.0（必过 0.90 阈值进 Judge），
         // 无关 ≈0.5（必低于 0.90 → LOW_SCORE_REFUSAL）——margin 明显

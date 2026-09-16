@@ -73,7 +73,8 @@ class EvalFlowIT {
             fakeModel.start();
         } catch (Exception e) {
             throw new IllegalStateException("FakeOpenAiServer 启动失败", e);
-        }        registry.add("minio.bucket", () -> "eval-it");
+        }
+        registry.add("minio.bucket", () -> "eval-it");
         registry.add("rag.models.chat.base-url", () -> fakeModel.baseUrl());
         registry.add("rag.models.embedding.base-url", () -> fakeModel.baseUrl());
         registry.add("rag.models.startup-check", () -> "false");
