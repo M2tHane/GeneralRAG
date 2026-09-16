@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @ActiveProfiles("test")
-class IngestionPipelineIT extends com.rag.support.SharedInfraSupport {
+class IngestionPipelineIT {
 
     private static com.rag.support.FakeOpenAiServer fakeModel;
 
@@ -49,15 +49,12 @@ class IngestionPipelineIT extends com.rag.support.SharedInfraSupport {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry registry) {
-        fakeModel = newFakeModel();
-        acquire();
-        registry.add("spring.datasource.url", mysql()::getJdbcUrl);
-        registry.add("spring.datasource.username", mysql()::getUsername);
-        registry.add("spring.datasource.password", mysql()::getPassword);
-        registry.add("spring.elasticsearch.uris",
-                () -> "http://" + es().getHost() + ":" + es().getMappedPort(9200));
-        registry.add("minio.endpoint",
-                () -> "http://" + minio().getHost() + ":" + minio().getMappedPort(9000));
+        try {
+            fakeModel = new com.rag.support.FakeOpenAiServer();
+            fakeModel.start();
+        } catch (Exception e) {
+            throw new IllegalStateException("FakeOpenAiServer 启动失败", e);
+        }
         registry.add("minio.access-key", () -> "minioadmin");
         registry.add("minio.secret-key", () -> "minioadmin");
         registry.add("minio.bucket", () -> "ing-it");

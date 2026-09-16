@@ -22,7 +22,6 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertySource;
 
 import com.rag.support.FakeOpenAiServer;
-import com.rag.support.SharedInfraSupport;
 
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -42,7 +41,7 @@ import static org.awaitility.Awaitility.await;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
-class DocumentVersionIT extends SharedInfraSupport {
+class DocumentVersionIT {
 
     private static FakeOpenAiServer fakeModel;
 
@@ -52,15 +51,12 @@ class DocumentVersionIT extends SharedInfraSupport {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry registry) {
-        fakeModel = newFakeModel();
-        acquire();
-        registry.add("spring.datasource.url", mysql()::getJdbcUrl);
-        registry.add("spring.datasource.username", mysql()::getUsername);
-        registry.add("spring.datasource.password", mysql()::getPassword);
-        registry.add("spring.elasticsearch.uris",
-                () -> "http://" + es().getHost() + ":" + es().getMappedPort(9200));
-        registry.add("minio.endpoint",
-                () -> "http://" + minio().getHost() + ":" + minio().getMappedPort(9000));
+        try {
+            fakeModel = new FakeOpenAiServer();
+            fakeModel.start();
+        } catch (Exception e) {
+            throw new IllegalStateException("FakeOpenAiServer 启动失败", e);
+        }
         registry.add("minio.access-key", () -> "minioadmin");
         registry.add("minio.secret-key", () -> "minioadmin");
         registry.add("minio.bucket", () -> "version-it");

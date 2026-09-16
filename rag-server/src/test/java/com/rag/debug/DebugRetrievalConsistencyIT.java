@@ -21,7 +21,6 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 import com.rag.support.FakeOpenAiServer;
-import com.rag.support.SharedInfraSupport;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -36,7 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         classes = {com.rag.RagApplication.class})
 @ActiveProfiles("test")
-class DebugRetrievalConsistencyIT extends SharedInfraSupport {
+class DebugRetrievalConsistencyIT {
 
     private static FakeOpenAiServer fakeModel;
 
@@ -48,15 +47,12 @@ class DebugRetrievalConsistencyIT extends SharedInfraSupport {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry registry) {
-        fakeModel = newFakeModel();
-        acquire();
-        registry.add("spring.datasource.url", mysql()::getJdbcUrl);
-        registry.add("spring.datasource.username", mysql()::getUsername);
-        registry.add("spring.datasource.password", mysql()::getPassword);
-        registry.add("spring.elasticsearch.uris",
-                () -> "http://" + es().getHost() + ":" + es().getMappedPort(9200));
-        registry.add("minio.endpoint",
-                () -> "http://" + minio().getHost() + ":" + minio().getMappedPort(9000));
+        try {
+            fakeModel = new FakeOpenAiServer();
+            fakeModel.start();
+        } catch (Exception e) {
+            throw new IllegalStateException("FakeOpenAiServer 启动失败", e);
+        }
         registry.add("minio.access-key", () -> "minioadmin");
         registry.add("minio.secret-key", () -> "minioadmin");
         registry.add("minio.bucket", () -> "debug-it");
@@ -96,8 +92,7 @@ class DebugRetrievalConsistencyIT extends SharedInfraSupport {
                                 "部署服务的端口为 8080。"),
                         new ChunkDoc(docId + "-c0001", "一致性测试文档 > 回调", null, 1, 20,
                                 "支付回调超时为 5 秒。")),
-                List.of(new float[] {1f, 0f, 0f, 0f, 0f, 0f, 0f, 0f},
-                        new float[] {0f, 1f, 0f, 0f, 0f, 0f, 0f, 0f}));
+                List.of(FakeOpenAiServer.unitVector(0), FakeOpenAiServer.unitVector(1)));
 
         String question = "支付回调超时是多少？";
         DebugResult.DebugRetrievalResult result = debugRetrievalService.debug(
@@ -121,6 +116,6 @@ class DebugRetrievalConsistencyIT extends SharedInfraSupport {
         assertThat(result.timings().searchMs()).isGreaterThanOrEqualTo(0);
         // effectiveConfig 与配置默认一致
         assertThat(result.effectiveConfig().embeddingModel()).isEqualTo("bge-m3");
-        assertThat(result.effectiveConfig().dimensions()).isEqualTo(8);
+        assertThat(result.effectiveConfig().dimensions()).isEqualTo(FakeOpenAiServer.DIMENSIONS);
     }
 }

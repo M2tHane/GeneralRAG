@@ -1,8 +1,19 @@
 # =====================================================================
-# 存储层集成测试（StorageIT）专用配置。
-#   * ES 用官方 elasticsearch:8.14.1（无 IK 插件）→ 分析器用 standard；
-#   * 向量维度用 8（便于手写测试向量）；其余容器地址经 @DynamicPropertySource 注入；
-#   * 模型 base-url 仅满足 @NotBlank 校验，测试不调用真实模型服务。
+# 集成测试专用配置（R4.1.x 起所有 IT 直接复用开发环境基础设施）。
+#
+#   ⚠ 运行 mvn test 的前提：开发 Docker 已启动（docker compose up -d）。
+#     MySQL / Elasticsearch / MinIO 不可用时测试直接失败，无自动拉起、
+#     无 Testcontainers fallback（Testcontainers 已于 R4.1.2 后移除）。
+#
+#   * 基础设施地址/凭据复用主配置键（MYSQL_*/ES_URIS/MINIO_*），
+#     默认值与 docker-compose.yml 一致，无需每个 IT 动态注入；
+#   * ES 容器镜像无 IK 插件 → 分析器用 standard；
+#   * 向量维度 1024 = 开发索引真实 mapping（共享索引，维度必须一致；
+#   * 模型 base-url 指向不可达地址，仅满足 @NotBlank 校验；
+#     各 IT 用 FakeOpenAiServer（本地内嵌 HTTP）覆盖 base-url。
+#
+#   隔离约定：测试只写自己创建的数据（随机 UUID 的 kbId/docId/runId 等
+#   + 独立 bucket 名），禁止全库/全索引/全 bucket 破坏性清理。
 # =====================================================================
 rag:
   models:
@@ -11,14 +22,25 @@ rag:
       base-url: http://localhost:0
     embedding:
       base-url: http://localhost:0
-      dimensions: 8
+      dimensions: ${EMBEDDING_DIMENSIONS:1024}
   elasticsearch:
     content-analyzer: standard
 
 spring:
+  datasource:
+    # 复用主配置键；测试环境默认直连开发库（凭据同 docker-compose.yml）
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB:rag}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true
+    username: ${MYSQL_USER:rag}
+    password: ${MYSQL_PASSWORD:rag-pass}
   elasticsearch:
+    uris: ${ES_URIS:http://localhost:9200}
     connection-timeout: 5s
     socket-timeout: 30s
+
+minio:
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+  access-key: ${MINIO_ACCESS_KEY:minioadmin}
+  secret-key: ${MINIO_SECRET_KEY:minioadmin}
 
 logging:
   level:

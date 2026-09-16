@@ -30,7 +30,8 @@ import com.sun.net.httpserver.HttpServer;
 public class FakeOpenAiServer {
 
     private static final ObjectMapper JSON = new ObjectMapper();
-    public static final int DIMENSIONS = 8;
+    /** 与开发环境索引 mapping 一致（共享真实 ES 索引，维度必须匹配真实 embedding 配置）。 */
+    public static final int DIMENSIONS = 1024;
 
     private HttpServer server;
     private int port;
@@ -283,16 +284,20 @@ public class FakeOpenAiServer {
     }
 
     /**
-     * 8 维伪向量：以文本哈希做确定性扰动，含少量公共分量，
+     * 伪向量：以文本哈希做确定性扰动，含少量公共分量，
      * 使「文本相近 → 向量相近」的断言可成立（仅测试用途，非真实语义向量）。
+     * 维度 = {@link #DIMENSIONS}（与开发环境索引 mapping 一致）。
      */
     public static float[] embedVector(String text) {
         float[] v = new float[DIMENSIONS];
         v[0] = 0.5f; // 公共基分量：任意两文本余弦相似度都不至于为 0
         if (text != null && !text.isEmpty()) {
             int h = text.hashCode();
+            // 逐维混合（Knuth 黄金比例乘数）：不相关文本在任意维度数下去相关——
+            // 旧 h>>i 方案在 32 位 int 之外全为 0，1024 维会塌缩到基分量（cos≈0.99）
             for (int i = 1; i < DIMENSIONS; i++) {
-                v[i] = ((h >> i) & 0xFF) / 255.0f;
+                int mixed = h * 31 + i * 0x9E3779B1;
+                v[i] = ((mixed >>> ((i & 3) * 8)) & 0xFF) / 255.0f;
             }
         }
         float norm = 0;
@@ -301,6 +306,13 @@ public class FakeOpenAiServer {
         for (int i = 0; i < DIMENSIONS; i++) {
             v[i] /= norm;
         }
+        return v;
+    }
+
+    /** 生成第 {@code idx} 位为 1 的单位向量（维度 = {@link #DIMENSIONS}）；供直写 ES 的套件使用。 */
+    public static float[] unitVector(int idx) {
+        float[] v = new float[DIMENSIONS];
+        v[idx] = 1f;
         return v;
     }
 

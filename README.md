@@ -130,9 +130,11 @@ pnpm build && pnpm start   # http://localhost:3000（/api 由 Next.js rewrites �
 ## 5. 测试
 
 ```bash
-cd rag-server && mvn test        # 201 个测试，含 Testcontainers 集成测试套件（含 AnswerabilityFlowIT）
+cd rag-server && mvn test        # 207 个测试（集成测试直连开发 Docker 的 MySQL/ES/MinIO）
 cd rag-web    && pnpm test       # vitest；pnpm e2e 需前后端同时在线
 ```
+
+> ⚠ 集成测试需要先 `docker compose up -d` 启动开发基础设施；MySQL/ES/MinIO 不可用时测试直接失败（无 Testcontainers，R4.1.2 后移除）。测试只写自己创建的数据（随机 UUID + 独立 bucket），不做全库/全索引清理。
 
 ## 已知局限
 

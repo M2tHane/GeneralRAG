@@ -10,7 +10,6 @@ import java.util.concurrent.TimeUnit;
 
 import com.rag.config.RagProperties;
 import com.rag.support.FakeOpenAiServer;
-import com.rag.support.SharedInfraSupport;
 import com.rag.domain.entity.ChatSessionEntity;
 import com.rag.domain.entity.DocumentEntity;
 import com.rag.domain.entity.KnowledgeBaseEntity;
@@ -61,7 +60,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-class AnswerabilityFlowIT extends SharedInfraSupport {
+class AnswerabilityFlowIT {
 
     private static FakeOpenAiServer fakeModel;
 
@@ -76,15 +75,12 @@ class AnswerabilityFlowIT extends SharedInfraSupport {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry registry) {
-        fakeModel = newFakeModel();
-        acquire();
-        registry.add("spring.datasource.url", mysql()::getJdbcUrl);
-        registry.add("spring.datasource.username", mysql()::getUsername);
-        registry.add("spring.datasource.password", mysql()::getPassword);
-        registry.add("spring.elasticsearch.uris",
-                () -> "http://" + es().getHost() + ":" + es().getMappedPort(9200));
-        registry.add("minio.endpoint",
-                () -> "http://" + minio().getHost() + ":" + minio().getMappedPort(9000));
+        try {
+            fakeModel = new FakeOpenAiServer();
+            fakeModel.start();
+        } catch (Exception e) {
+            throw new IllegalStateException("FakeOpenAiServer 启动失败", e);
+        }
         registry.add("minio.access-key", () -> "minioadmin");
         registry.add("minio.secret-key", () -> "minioadmin");
         registry.add("minio.bucket", () -> "answerability-it");
@@ -95,7 +91,7 @@ class AnswerabilityFlowIT extends SharedInfraSupport {
         registry.add("rag.retrieval.mode", () -> "VECTOR");
         // ES 8 knn（similarity=cosine）的 _score = (1+cos)/2 ∈ [0,1]；fake 向量含公共基分量，
         // cos 恒 > 0 ⇒ score 恒 > 0.5，默认 0.30 阈值无法区分高低分。此处取 0.90：
-        // HIGH_SCORE_QUESTION（cos≈0.886 → score≈0.943）≥ 0.90 进 Judge；
+        // HIGH_SCORE_QUESTION 与分块向量同构（cos=1.0 → score=1.0）≥ 0.90 进 Judge；
         // LOW_SCORE_QUESTION（cos≈0.265 → score≈0.633）< 0.90 → LOW_SCORE_REFUSAL。
         registry.add("rag.retrieval.refusal.cosine-threshold", () -> "0.90");
         // Judge 超时压短：timeout 场景不必等 15s
@@ -140,9 +136,13 @@ class AnswerabilityFlowIT extends SharedInfraSupport {
         documentRepository.save(doc);
 
         esChunkIndex.ensureIndex();
+        // 分块向量 = embedVector(HIGH_SCORE_QUESTION)：保证高分问题的查询向量与
+        // top1 分块完全同向（cos=1.0 → score=1.0 ≥ 0.90 → 必进 Judge），而低分问题
+        // （无关字符串）经逐维混合去相关后 score < 0.90 → LOW_SCORE_REFUSAL。
+        // 正文仍是 DOC_CHUNK，case1 的回答/引用断言不受影响。
         esChunkIndex.rebuildChunks(docId, kbId,
                 List.of(new ChunkDoc(docId + "-c0000", "answerability-it 文档 > 回调配置", null, 0, 12, DOC_CHUNK)),
-                List.of(FakeOpenAiServer.embedVector(DOC_CHUNK)));
+                List.of(FakeOpenAiServer.embedVector(HIGH_SCORE_QUESTION)));
     }
 
     /** 与文档无关的问题（假向量 cos≈0.265 < 0.30）：Case 5 低分直拒。 */

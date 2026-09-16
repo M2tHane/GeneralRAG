@@ -27,7 +27,7 @@ import com.rag.storage.minio.ObjectStore;
 import com.rag.storage.repository.CleanupTaskRepository;
 import com.rag.storage.repository.DocumentRepository;
 import com.rag.storage.repository.IngestionTaskRepository;
-import com.rag.support.SharedInfraSupport;
+import com.rag.support.FakeOpenAiServer;
 import com.rag.storage.repository.KnowledgeBaseRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,7 +49,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 @SpringBootTest
 @ActiveProfiles("test")
-class StorageIT extends SharedInfraSupport {
+class StorageIT {
 
     private static final List<String> ALL_TABLES = List.of(
             "knowledge_base", "document", "ingestion_task", "cleanup_task",
@@ -58,14 +58,6 @@ class StorageIT extends SharedInfraSupport {
 
     @DynamicPropertySource
     static void containerProperties(DynamicPropertyRegistry registry) {
-        acquire();
-        registry.add("spring.datasource.url", mysql()::getJdbcUrl);
-        registry.add("spring.datasource.username", mysql()::getUsername);
-        registry.add("spring.datasource.password", mysql()::getPassword);
-        registry.add("spring.elasticsearch.uris",
-                () -> "http://" + es().getHost() + ":" + es().getMappedPort(9200));
-        registry.add("minio.endpoint",
-                () -> "http://" + minio().getHost() + ":" + minio().getMappedPort(9000));
         registry.add("minio.access-key", () -> "minioadmin");
         registry.add("minio.secret-key", () -> "minioadmin");
         registry.add("minio.bucket", () -> "rag-it");
@@ -235,14 +227,16 @@ class StorageIT extends SharedInfraSupport {
 
         ChunkDoc chunkA1 = new ChunkDoc(docA + "-c0001", "研发规范>架构", 3, 1, 12, "微服务架构设计原则");
         ChunkDoc chunkA2 = new ChunkDoc(docA + "-c0002", "研发规范>测试", null, 2, 12, "接口测试覆盖要求");
-        float[] vectorA1 = {1f, 0f, 0f, 0f, 0f, 0f, 0f, 0f};
-        float[] vectorA2 = {0f, 1f, 0f, 0f, 0f, 0f, 0f, 0f};
+        // 向量维度必须匹配实际索引 mapping（开发环境索引为真实 embedding 维度），
+        // 不能假设 test profile 的 8 维——共享开发索引是本套件的前提
+        float[] vectorA1 = FakeOpenAiServer.unitVector(0);
+        float[] vectorA2 = FakeOpenAiServer.unitVector(1);
 
         assertThat(esChunkIndex.rebuildChunks(docA, kbA, List.of(chunkA1, chunkA2),
                 List.of(vectorA1, vectorA2))).isEqualTo(2);
 
         ChunkDoc chunkB1 = new ChunkDoc(docB + "-c0001", "其他知识库", 1, 1, 4, "无关内容");
-        float[] vectorB1 = {0f, 0f, 1f, 0f, 0f, 0f, 0f, 0f};
+        float[] vectorB1 = FakeOpenAiServer.unitVector(2);
         esChunkIndex.rebuildChunks(docB, kbB, List.of(chunkB1), List.of(vectorB1));
 
         // 幂等重建：重复执行不产生重复分块
@@ -279,6 +273,8 @@ class StorageIT extends SharedInfraSupport {
     // ------------------------------------------------------------------
     // helper
     // ------------------------------------------------------------------
+
+
 
     private String newKb() {
         KnowledgeBaseEntity kb = new KnowledgeBaseEntity();

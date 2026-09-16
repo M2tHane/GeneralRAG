@@ -24,7 +24,6 @@ import com.rag.storage.repository.EvalRunItemRepository;
 import com.rag.storage.repository.EvalRunRepository;
 import com.rag.storage.repository.KnowledgeBaseRepository;
 import com.rag.support.FakeOpenAiServer;
-import com.rag.support.SharedInfraSupport;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -47,14 +46,14 @@ import static org.assertj.core.api.Assertions.within;
  * （与 QaStreamIT 相同的 ES 直写方式）；经 EvalService 导入 JSON 数据集 → runSync
  * 同步执行 → 断言 configSnapshot / hit / metrics / 人工标注。</p>
  *
- * <p>R4.1.1：MySQL/ES/MinIO 改用 {@link SharedInfraSupport} 共享容器（引用计数），
- * 套件隔离靠随机 UUID 数据与独立 bucket 名；FakeOpenAiServer 保持套件私有。</p>
+ * <p>R4.1.2 后：MySQL/ES/MinIO 直连开发环境（配置统一在 application-test.yaml），
+ * 套件隔离靠随机 UUID 数据、独立 bucket 名与随机数据集名；FakeOpenAiServer 套件私有。</p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         classes = {com.rag.RagApplication.class})
 @ActiveProfiles("test")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-class EvalFlowIT extends SharedInfraSupport {
+class EvalFlowIT {
 
     private static FakeOpenAiServer fakeModel;
 
@@ -69,15 +68,12 @@ class EvalFlowIT extends SharedInfraSupport {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry registry) {
-        fakeModel = newFakeModel();
-        acquire();
-        registry.add("spring.datasource.url", mysql()::getJdbcUrl);
-        registry.add("spring.datasource.username", mysql()::getUsername);
-        registry.add("spring.datasource.password", mysql()::getPassword);
-        registry.add("spring.elasticsearch.uris",
-                () -> "http://" + es().getHost() + ":" + es().getMappedPort(9200));
-        registry.add("minio.endpoint",
-                () -> "http://" + minio().getHost() + ":" + minio().getMappedPort(9000));
+        try {
+            fakeModel = new FakeOpenAiServer();
+            fakeModel.start();
+        } catch (Exception e) {
+            throw new IllegalStateException("FakeOpenAiServer 启动失败", e);
+        }
         registry.add("minio.access-key", () -> "minioadmin");
         registry.add("minio.secret-key", () -> "minioadmin");
         registry.add("minio.bucket", () -> "eval-it");
@@ -102,6 +98,8 @@ class EvalFlowIT extends SharedInfraSupport {
 
     static String kbId;
     static EvalService.EvalDatasetView datasetV1;
+    /** 数据集名带运行级随机后缀：共享开发库，同名历史数据不得影响断言（R4.1.3 隔离） */
+    static String datasetName;
     static EvalService.EvalDatasetView datasetV2;
     static UUID runId;
 
@@ -132,8 +130,8 @@ class EvalFlowIT extends SharedInfraSupport {
                                 "支付回调确认超时为 5 秒。"),
                         new ChunkDoc(docId + "-c0001", "支付接口文档 > 签名算法", null, 1, 20,
                                 "请求签名使用 HMAC-SHA256。")),
-                List.of(new float[] {1f, 0f, 0f, 0f, 0f, 0f, 0f, 0f},
-                        new float[] {0f, 1f, 0f, 0f, 0f, 0f, 0f, 0f}));
+                List.of(FakeOpenAiServer.unitVector(0), FakeOpenAiServer.unitVector(1)));
+        datasetName = "eval-it-集-" + UUID.randomUUID().toString().substring(0, 8);
     }
 
     @Test
@@ -147,7 +145,7 @@ class EvalFlowIT extends SharedInfraSupport {
                   {"question":"知识库里完全没有的话题问题？","answerable":false,"category":"OUT_OF_KB","evidence":[]}
                 ]
                 """.formatted(DOC_NAME, DOC_TITLE_PATH);
-        datasetV1 = evalService.importDataset(multipartFile(json1, "评测集.json"), "eval-it-集", DatasetType.TUNING);
+        datasetV1 = evalService.importDataset(multipartFile(json1, "评测集.json"), datasetName, DatasetType.TUNING);
         assertThat(datasetV1.latestVersion().versionNo()).isEqualTo(1);
         assertThat(datasetV1.latestVersion().itemCount()).isEqualTo(2);
         assertThat(datasetV1.datasetType()).isEqualTo(DatasetType.TUNING);
@@ -159,13 +157,13 @@ class EvalFlowIT extends SharedInfraSupport {
                    "evidence":[{"docName":"%s","titlePath":"%s"}]}
                 ]
                 """.formatted(DOC_NAME, "支付接口文档 > 签名算法");
-        datasetV2 = evalService.importDataset(multipartFile(json2, "评测集.json"), "eval-it-集", DatasetType.TUNING);
+        datasetV2 = evalService.importDataset(multipartFile(json2, "评测集.json"), datasetName, DatasetType.TUNING);
         assertThat(datasetV2.id()).isEqualTo(datasetV1.id());
         assertThat(datasetV2.latestVersion().versionNo()).isEqualTo(2);
         assertThat(datasetV2.latestVersion().versionId()).isNotEqualTo(datasetV1.latestVersion().versionId());
 
         List<EvalService.EvalDatasetView> datasets = evalService.listDatasets();
-        assertThat(datasets).extracting(EvalService.EvalDatasetView::name).contains("eval-it-集");
+        assertThat(datasets).extracting(EvalService.EvalDatasetView::name).contains(datasetName);
     }
 
     @Test
@@ -191,7 +189,8 @@ class EvalFlowIT extends SharedInfraSupport {
         Map<String, Object> snapshot = finished.getConfigSnapshot();
         assertThat(snapshot).containsKeys("chatModel", "embeddingModel", "embeddingDimensions",
                 "topK", "minScore");
-        assertThat(snapshot.get("embeddingDimensions")).isEqualTo(8);
+        assertThat(snapshot.get("embeddingDimensions"))
+                .isEqualTo(FakeOpenAiServer.DIMENSIONS);
         assertThat(snapshot.get("topK")).isEqualTo(ragProperties.getRetrieval().getTopK());
 
         // metrics 结构（EV-3：answerable=1 题，命中 → hitAt*=1.0；OUT_OF_KB 不计分母）

@@ -54,6 +54,11 @@ public class EsChunkIndex {
     private final String contentAnalyzer;
     private final int vectorDims;
 
+    /** 仅供测试读取注入的向量维度（StorageIT 按此生成手写向量）；产品代码勿用。 */
+    public int vectorDimsForTest() {
+        return vectorDims;
+    }
+
     public EsChunkIndex(ElasticsearchClient client, RagProperties ragProperties) {
         this.client = client;
         this.contentAnalyzer = ragProperties.getElasticsearch().getContentAnalyzer();

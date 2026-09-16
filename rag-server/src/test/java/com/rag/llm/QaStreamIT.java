@@ -10,7 +10,6 @@ import java.util.concurrent.TimeUnit;
 
 import com.rag.config.RagProperties;
 import com.rag.support.FakeOpenAiServer;
-import com.rag.support.SharedInfraSupport;
 import com.rag.domain.entity.ChatMessageEntity;
 import com.rag.domain.entity.ChatSessionEntity;
 import com.rag.domain.entity.DocumentEntity;
@@ -55,7 +54,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-class QaStreamIT extends SharedInfraSupport {
+class QaStreamIT {
 
     /** OpenAI 兼容假模型服务：/v1/embeddings 返回 8 维向量；/v1/chat/completions 流式返回。 */
     private static FakeOpenAiServer fakeModel;
@@ -72,16 +71,13 @@ class QaStreamIT extends SharedInfraSupport {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry registry) {
-        // 先启动假模型与容器再注册属性（容器为共享单例，见 SharedInfraSupport）
-        fakeModel = newFakeModel();
-        acquire();
-        registry.add("spring.datasource.url", mysql()::getJdbcUrl);
-        registry.add("spring.datasource.username", mysql()::getUsername);
-        registry.add("spring.datasource.password", mysql()::getPassword);
-        registry.add("spring.elasticsearch.uris",
-                () -> "http://" + es().getHost() + ":" + es().getMappedPort(9200));
-        registry.add("minio.endpoint",
-                () -> "http://" + minio().getHost() + ":" + minio().getMappedPort(9000));
+        // 先启动假模型再注册属性（基础设施直连开发环境，配置在 application-test.yaml）
+        try {
+            fakeModel = new FakeOpenAiServer();
+            fakeModel.start();
+        } catch (Exception e) {
+            throw new IllegalStateException("FakeOpenAiServer 启动失败", e);
+        }
         registry.add("minio.access-key", () -> "minioadmin");
         registry.add("minio.secret-key", () -> "minioadmin");
         registry.add("minio.bucket", () -> "qa-it");
@@ -144,7 +140,7 @@ class QaStreamIT extends SharedInfraSupport {
         esChunkIndex.rebuildChunks(docId, kbId,
                 List.of(new ChunkDoc(docId + "-c0000", "qa-it 文档 > 回调配置", null, 0, 12,
                         "支付回调确认超时为 5 秒。")),
-                List.of(new float[] {1f, 0f, 0f, 0f, 0f, 0f, 0f, 0f}));
+                List.of(FakeOpenAiServer.unitVector(0)));
     }
 
     @Test
@@ -241,7 +237,7 @@ class QaStreamIT extends SharedInfraSupport {
         esChunkIndex.rebuildChunks(docId, kbId,
                 List.of(new ChunkDoc(docId + "-c0000", "qa-it 文档 > 回调配置", null, 0, 12,
                         "支付回调确认超时为 5 秒。")),
-                List.of(new float[] {1f, 0f, 0f, 0f, 0f, 0f, 0f, 0f}));
+                List.of(FakeOpenAiServer.unitVector(0)));
 
         documentRepository.deleteById(docId);
         documentRepository.flush();

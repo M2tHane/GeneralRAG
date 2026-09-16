@@ -35,8 +35,6 @@
     <!-- Boot 3.3.13 的 dependencyManagement 不管理 parsson（JSON-P 实现），需显式钉版本；
          1.1.x 与 Boot 托管的 jakarta.json-api 2.1.x 兼容 -->
     <parsson.version>1.1.7</parsson.version>
-    <!-- 覆盖 Boot BOM 的 1.19.8：Docker Engine 29.x 的 API 协商与旧 docker-java 不兼容（/version 400），1.21.4+ 修复 -->
-    <testcontainers.version>1.21.4</testcontainers.version>
   </properties>
 
   <!-- LangChain4j BOM：统一管理 open-ai(1.0.1) 与 pdfbox parser(1.0.1-beta6) 版本。
@@ -142,21 +140,6 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.testcontainers</groupId>
-      <artifactId>junit-jupiter</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.testcontainers</groupId>
-      <artifactId>mysql</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.testcontainers</groupId>
-      <artifactId>elasticsearch</artifactId>
       <scope>test</scope>
     </dependency>
     <!-- mockwebserver：模型服务替身（版本由 Boot 托管的 okhttp3 BOM 管理） -->

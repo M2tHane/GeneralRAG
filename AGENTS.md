@@ -139,7 +139,15 @@ answerability confusion matrix + two-run comparison with comparability guard).
 - Progress & round-3 plan: `docs/round2/03-进度与第三轮计划.md`
 - Round-2 implementation record: `docs/round2/02-实施记录.md`
 - Round-1 handoff: `docs/HANDOFF.md`
-- Test counts cited anywhere: backend 201 (`mvn test`), frontend 30 (vitest). Re-verify before relying on them.
+- Test counts cited anywhere: backend 207 (`mvn test`), frontend 30 (vitest). Re-verify before relying on them.
+- **Test strategy (changed in R4.1.2 closure)**: Testcontainers REMOVED (dependency, SharedInfraSupport,
+  and its lifecycle tests deleted). All ITs connect directly to the dev Docker stack
+  (MySQL/ES/MinIO; credentials/addresses via the standard MYSQL_*/ES_URIS/MINIO_* keys in
+  `application-test.yaml`, defaults matching docker-compose.yml). Running `mvn test` creates
+  ZERO containers and starts no Ryuk — if the dev stack is down, tests fail fast. Test data
+  isolation: random UUID ids, per-suite MinIO buckets, dataset names with random suffix;
+  no full-DB/index/bucket destructive cleanup. FakeOpenAiServer remains per-suite (stateful).
+  Test fake vectors are 1024-dim (`FakeOpenAiServer.DIMENSIONS`) to match the real index mapping.
 
 **Dead config watch**: `rag.retrieval.refusal.insufficient-threshold` / `RAG_REFUSAL_THRESHOLD`
 were dead keys (removed in R4). Refusal thresholds are `rerank-threshold` /

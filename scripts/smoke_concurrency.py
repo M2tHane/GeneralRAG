@@ -88,7 +88,10 @@ def preflight():
     print(json.dumps({"preflight": "OK(env)", "kbId": KB}, ensure_ascii=False))
 
 def _behavior_probe():
-    """行为探针：语料外题必须 LOW_SCORE_REFUSAL（证明阈值 0.75 + answerability 生效）。"""
+    """sanity check：语料外题被低分门控直拒只能证明"低分门控在工作"——
+    不能精确证明 rerank threshold 恰为 0.75 / maxConcurrentJudges=4 /
+    bulkheadWaitMs=500。精确校验需 /actuator/env（未暴露时不新增接口），
+    启动服务时请自行确保这些配置（见文件头前置条件）。"""
     body = json.dumps({"kbId": KB, "question": PROBE_QUESTION, "mode": "HYBRID_RERANK"}).encode()
     req = urllib.request.Request(BASE + "/api/v1/debug/retrieval", data=body,
                                  headers={"Content-Type": "application/json"})
@@ -100,11 +103,13 @@ def _behavior_probe():
         return
     dec = (d.get("answerability") or {}).get("decisionType")
     if dec == "LOW_SCORE_REFUSAL":
-        print(json.dumps({"preflight": "OK(probe)", "probeDecision": dec,
-                          "explanation": "语料外探针题被 0.75 阈值直拒，正式配置已生效"}, ensure_ascii=False))
+        print(json.dumps({"preflight": "OK(sanity-check)", "probeDecision": dec,
+                          "explanation": "语料外探针题被低分门控直拒——门控在工作；"
+                                         "精确的 threshold/bulkhead 值请以服务启动配置为准"}, ensure_ascii=False))
     else:
         print(json.dumps({"preflight": "FAIL", "probeDecision": dec,
-                          "explanation": "语料外探针题未被直拒——threshold≠0.75 或 answerability 未开启"}, ensure_ascii=False))
+                          "explanation": "语料外探针题未被直拒——低分门控未生效"
+                                         "（threshold 过低或 answerability 关闭）"}, ensure_ascii=False))
         sys.exit(2)
 
 def make_session():
