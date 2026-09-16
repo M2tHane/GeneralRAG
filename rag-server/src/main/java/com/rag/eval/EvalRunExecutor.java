@@ -184,9 +184,13 @@ public class EvalRunExecutor {
         int refusalCorrect = 0;
         int refusalTotal = 0;
         // R4：Answerability 混淆矩阵与 Judge 成本统计
-        int refusedCount = 0;
+        // R4.1 语义修正：Judge 降级（TIMEOUT/OVERLOADED/MODEL_ERROR/INVALID_RESPONSE）
+        // 属系统故障而非拒答能力——degraded 题不计入 TP/FP/FN/TN 与 refusalAccuracy
+        // （否则 failClosed=true 时故障会被算成 Correct Refusal 虚假提升指标），
+        // 单独按 decisionType 细分统计，在 answerabilityConfusion.degraded 中透出。
         int judgeInvokedCount = 0;
         int judgeDegradedCount = 0;
+        Map<String, Integer> degradedByType = new java.util.LinkedHashMap<>();
         long judgeLatencySum = 0;
         int tpCount = 0;
         int fpCount = 0;
@@ -263,14 +267,17 @@ public class EvalRunExecutor {
             }
 
             // R2-E3：拒答正确率（answerable=false 应拒；answerable=true 不应拒）
-            if (!executionFailed) {
+            // R4.1：degraded 题（Judge 系统故障）不计入混淆矩阵与拒答正确率——
+            // 故障既不是"正确拒答"也不是"误拒"，混入会系统性污染两类指标
+            boolean degraded = answer != null && answer.answerability() != null
+                    && answer.answerability().degraded();
+            if (!executionFailed && !degraded) {
                 refusalTotal++;
                 boolean refused = answer != null && answer.refusal();
                 if (item.isAnswerable() == !refused) {
                     refusalCorrect++;
                 }
                 if (refused) {
-                    refusedCount++;
                     if (item.isAnswerable()) {
                         fnCount++;
                     } else {
@@ -318,15 +325,14 @@ public class EvalRunExecutor {
                     runItem.setAnswerabilityLatencyMs(toIntMs(dec.latencyMs()));
                     if (dec.degraded()) {
                         judgeDegradedCount++;
+                        String type = dec.decisionType() == null ? "UNKNOWN" : dec.decisionType().name();
+                        degradedByType.merge(type, 1, Integer::sum);
                     }
                     if (dec.judgeInvoked()) {
                         judgeInvokedCount++;
                         judgeLatencySum += dec.latencyMs();
                     }
                 }
-            }
-            if (answer != null && answer.refusal()) {
-                refusedCount++;
             }
             runItemRepository.save(runItem);
 
@@ -356,9 +362,11 @@ public class EvalRunExecutor {
                 : round4((double) refusalCorrect / refusalTotal));
         metrics.put("answerableCount", answerableCount);
         metrics.put("outOfKbCount", refusalTotal - answerableCount);
-        // R4：Answerability 混淆矩阵（逐题累计：TP=应答且答 FP=不应答却答 FN=应答却拒 TN=不应答且拒）
+        // R4：Answerability 混淆矩阵（逐题累计：TP=应答且答 FP=不应答却答 FN=应答却拒 TN=不应答且拒；
+        // degraded 题 = 系统故障，不计入四格，单独透出 decisionType 细分）
         metrics.put("answerabilityConfusion", confusionMetrics(refusalTotal, judgeInvokedCount,
-                judgeDegradedCount, judgeLatencySum, categoryStats, tpCount, fpCount, fnCount, tnCount));
+                judgeDegradedCount, judgeLatencySum, categoryStats, tpCount, fpCount, fnCount, tnCount,
+                degradedByType));
         // R2-L1：耗时拆分与分位数
         metrics.put("avgLatencyMs", executed == 0 ? null : round4((double) totalLatency / executed));
         metrics.put("retrievalMsAvg", executed == 0 ? null : round4((double) totalRetrieval / executed));
@@ -425,11 +433,19 @@ public class EvalRunExecutor {
      *   <li>judgeInvocationRate = 调 Judge 题数 / 已执行题数（成本）</li>
      *   <li>judgeDegradedRate = Judge 降级题数 / 已调 Judge 题数（可用性）</li>
      * </ul>
+     *
+     * <p>R4.1 语义修正：{@code degraded} 题（Judge TIMEOUT/OVERLOADED/MODEL_ERROR/
+     * INVALID_RESPONSE）是<b>系统故障</b>而非判定能力——不进 TP/FP/FN/TN，
+     * 也不进 falseAnswerRate / falseRefusalRate / refusalAccuracy；否则
+     * failClosed=true 时每次故障都被记成 Correct Refusal，指标被系统性高估。
+     * 降级明细按 decisionType 计数，在 {@code degraded} 字段透出（总量
+     * {@code judgeDegradedRate} 不变，可与明细相互印证）。</p>
      */
     private static Map<String, Object> confusionMetrics(int executed, int judgeInvoked,
                                                         int judgeDegraded, long judgeLatencySum,
                                                         Map<String, int[]> categoryStats,
-                                                        int tp, int fp, int fn, int tn) {
+                                                        int tp, int fp, int fn, int tn,
+                                                        Map<String, Integer> degradedByType) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("tp", tp);
         m.put("fp", fp);
@@ -444,6 +460,7 @@ public class EvalRunExecutor {
         m.put("judgeInvocationRate", executed == 0 ? null : round4((double) judgeInvoked / executed));
         m.put("judgeDegradedRate", judgeInvoked == 0 ? null : round4((double) judgeDegraded / judgeInvoked));
         m.put("judgeLatencyMsAvg", judgeInvoked == 0 ? null : round4((double) judgeLatencySum / judgeInvoked));
+        m.put("degraded", Map.copyOf(degradedByType));
         Map<String, Object> breakdown = new LinkedHashMap<>();
         for (Map.Entry<String, int[]> e : categoryStats.entrySet()) {
             int[] stat = e.getValue();

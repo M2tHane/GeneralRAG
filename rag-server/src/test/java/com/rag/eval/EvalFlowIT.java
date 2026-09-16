@@ -293,6 +293,70 @@ class EvalFlowIT {
         assertThat(reloaded.getReviewNote()).isEqualTo("证据在库但未召回");
     }
 
+    /**
+     * R4.1 语义守卫：Judge 系统故障（TIMEOUT/OVERLOADED/MODEL_ERROR/INVALID_RESPONSE）
+     * 是 SYSTEM_ERROR 而非拒答能力——degraded 题不得进入 TP/FP/FN/TN 与
+     * refusalAccuracy，否则 failClosed=true 时每次故障都会被记成 Correct Refusal，
+     * 指标被系统性高估。
+     *
+     * <p>构造：nonStreamFailure=true → Judge 请求 500 → MODEL_ERROR → JUDGE_DEGRADED。
+     * 本套件 failClosed=false（默认）→ 降级放行生成。两题数据集（1 answerable +
+     * 1 OUT_OF_KB）若按旧逻辑会分别记 TP/TN；修复后必须全部出格，
+     * 只出现在 confusion.degraded 明细中。</p>
+     */
+    @Test
+    @Order(6)
+    void judgeSystemErrorExcludedFromConfusionMatrix() {
+        String json = """
+                [
+                  {"question":"支付回调确认超时是多少？","referenceAnswer":"5 秒",
+                   "answerable":true,"category":"DIRECT",
+                   "evidence":[{"docName":"%s","titlePath":"%s"}]},
+                  {"question":"知识库里完全没有的话题问题？","answerable":false,"category":"OUT_OF_KB","evidence":[]}
+                ]
+                """.formatted(DOC_NAME, DOC_TITLE_PATH);
+        EvalService.EvalDatasetView ds = evalService.importDataset(
+                multipartFile(json, "降级语义集.json"), "eval-it-降级集", DatasetType.TUNING);
+
+        fakeModel.resetNonStreamCounters();
+        fakeModel.setNonStreamFailure(true); // Judge 请求 500 → MODEL_ERROR → JUDGE_DEGRADED
+        fakeModel.setNonStreamAnswer(null);
+        fakeModel.setChatAnswer("降级放行后的回答。");
+
+        EvalRunEntity run = evalService.createRun(UUID.fromString(ds.id()),
+                UUID.fromString(ds.latestVersion().versionId()),
+                UUID.fromString(kbId), null, null);
+        evalService.runSync(UUID.fromString(run.getId()));
+
+        EvalRunEntity finished = evalService.getRun(UUID.fromString(run.getId()));
+        assertThat(finished.getStatus()).isEqualTo(EvalRunStatus.COMPLETED);
+        Map<String, Object> metrics = finished.getMetrics();
+
+        // 两题都调了 Judge 且全部降级（MODEL_ERROR）
+        @SuppressWarnings("unchecked")
+        Map<String, Object> confusion = (Map<String, Object>) metrics.get("answerabilityConfusion");
+        assertThat(confusion).isNotNull();
+        // degraded 题不进四格：修复前这里是 tp=1, tn=1（系统故障被算成正确判定）
+        assertThat(confusion).containsEntry("tp", 0).containsEntry("fp", 0)
+                .containsEntry("fn", 0).containsEntry("tn", 0);
+        assertThat(((Number) confusion.get("judgeDegradedRate")).doubleValue()).isEqualTo(1.0);
+        // 降级明细按 decisionType 透出（2 题 → JUDGE_DEGRADED ×2）
+        @SuppressWarnings("unchecked")
+        Map<String, Object> degraded = (Map<String, Object>) confusion.get("degraded");
+        assertThat(degraded).containsEntry("JUDGE_DEGRADED", 2);
+
+        // refusalAccuracy 分母同样排除 degraded 题（0 题参与 → null）
+        assertThat(metrics.get("refusalAccuracy")).isNull();
+
+        // 逐题决策落库可复盘：两题 decisionType=JUDGE_DEGRADED、degraded=true
+        EvalRunViewService.ItemPage items = runViewService.listItems(finished, 1, 10);
+        assertThat(items.total()).isEqualTo(2);
+        assertThat(items.items()).allSatisfy(i ->
+                assertThat(i.get("answerabilityDecisionType")).isEqualTo("JUDGE_DEGRADED"));
+
+        fakeModel.setNonStreamFailure(false);
+    }
+
     private static MockMultipartFile multipartFile(String content, String fileName) {
         return new MockMultipartFile("file", fileName, "application/json",
                 content.getBytes(StandardCharsets.UTF_8));
