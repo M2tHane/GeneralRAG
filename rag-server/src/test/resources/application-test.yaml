@@ -7,8 +7,9 @@
 #
 #   * 基础设施地址/凭据复用主配置键（MYSQL_*/ES_URIS/MINIO_*），
 #     默认值与 docker-compose.yml 一致，无需每个 IT 动态注入；
-#   * ES 容器镜像无 IK 插件 → 分析器用 standard；
-#   * 向量维度 1024 = 开发索引真实 mapping（共享索引，维度必须一致；
+#   * 直连开发 ES（docker-compose 已装 analysis-ik）→ 分析器继承正式
+#     ik_max_word，不覆盖——避免测试先建索引把 mapping 固化为 standard；
+#   * 向量维度 1024 = 开发索引真实 mapping（共享索引，维度必须一致）；
 #   * 模型 base-url 指向不可达地址，仅满足 @NotBlank 校验；
 #     各 IT 用 FakeOpenAiServer（本地内嵌 HTTP）覆盖 base-url。
 #
@@ -23,8 +24,6 @@ rag:
     embedding:
       base-url: http://localhost:0
       dimensions: ${EMBEDDING_DIMENSIONS:1024}
-  elasticsearch:
-    content-analyzer: standard
 
 spring:
   datasource:

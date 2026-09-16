@@ -50,10 +50,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>模型服务为 {@link FakeOpenAiServer}（OpenAI 兼容替身）：
  * 非流式请求 = Judge 路径（setNonStreamAnswer 定向输出 / nonStreamFailure 注入
  * 500 / nonStreamDelayMs 注入慢响应），流式请求 = 生成路径（setChatAnswer）。
- * 假向量按文本哈希确定性生成：文本余弦相似度可预先算出（python 模拟校准）。
- * ES 8 knn（similarity=cosine）的 score = (1+cos)/2：相关问题 cos≈0.886 → score≈0.943，
- * 无关问题 cos≈0.265 → score≈0.633。阈值显式设 0.90（见 @DynamicPropertySource 说明）
- * ——fake 向量的公共基分量使 score 恒 >0.5，默认 0.30 在此环境无法触发低分直拒。</p>
+ * 假向量为 1024 维 deterministic pseudo-random（{@code FakeOpenAiServer.embedVector}，
+ * 性质由 {@code FakeOpenAiServerVectorTest} 锁定）：同文本 cos=1.0，不同文本近正交。
+ * ES knn（similarity=cosine）score = (1+cos)/2。阈值显式设 0.90（见
+ * @DynamicPropertySource 说明）：HIGH_SCORE_QUESTION 的分块向量直接取同一
+ * embedVector → cos=1 → score=1 → 进 Judge；LOW_SCORE_QUESTION 为不同文本
+ * → cos≈0 → score≈0.5 → LOW_SCORE_REFUSAL，两侧 margin 明显。</p>
  *
  * <p>检索模式固定 VECTOR（假模型无 rerank 服务）。</p>
  */
@@ -80,19 +82,16 @@ class AnswerabilityFlowIT {
             fakeModel.start();
         } catch (Exception e) {
             throw new IllegalStateException("FakeOpenAiServer 启动失败", e);
-        }
-        registry.add("minio.access-key", () -> "minioadmin");
-        registry.add("minio.secret-key", () -> "minioadmin");
-        registry.add("minio.bucket", () -> "answerability-it");
+        }        registry.add("minio.bucket", () -> "answerability-it");
         registry.add("rag.models.chat.base-url", () -> fakeModel.baseUrl());
         registry.add("rag.models.embedding.base-url", () -> fakeModel.baseUrl());
         registry.add("rag.models.startup-check", () -> "false");
         // 本套件主旨：Answerability 开启下的全链路行为（refusal 开启同理，默认即开）
         registry.add("rag.retrieval.mode", () -> "VECTOR");
-        // ES 8 knn（similarity=cosine）的 _score = (1+cos)/2 ∈ [0,1]；fake 向量含公共基分量，
-        // cos 恒 > 0 ⇒ score 恒 > 0.5，默认 0.30 阈值无法区分高低分。此处取 0.90：
-        // HIGH_SCORE_QUESTION 与分块向量同构（cos=1.0 → score=1.0）≥ 0.90 进 Judge；
-        // LOW_SCORE_QUESTION（cos≈0.265 → score≈0.633）< 0.90 → LOW_SCORE_REFUSAL。
+        // ES knn（similarity=cosine）的 _score = (1+cos)/2 ∈ [0,1]。fake 向量为
+        // deterministic pseudo-random：HIGH_SCORE_QUESTION 与分块向量同构
+        // （cos=1 → score=1）→ 进 Judge；LOW_SCORE_QUESTION 不同文本（cos≈0
+        // → score≈0.5）→ LOW_SCORE_REFUSAL。margin 由 FakeOpenAiServerVectorTest 锁定。
         registry.add("rag.retrieval.refusal.cosine-threshold", () -> "0.90");
         // Judge 超时压短：timeout 场景不必等 15s
         registry.add("rag.retrieval.answerability.judge-timeout-seconds", () -> "2");
@@ -145,10 +144,10 @@ class AnswerabilityFlowIT {
                 List.of(FakeOpenAiServer.embedVector(HIGH_SCORE_QUESTION)));
     }
 
-    /** 与文档无关的问题（假向量 cos≈0.265 < 0.30）：Case 5 低分直拒。 */
+    /** 与分块文本无关的问题（不同文本 → 伪向量近正交，score≈0.5）：Case 5 低分直拒。 */
     private static final String LOW_SCORE_QUESTION = "urjlprhzcojlniej";
 
-    /** 与文档相关的问题（假向量 cos≈0.886 ≥ 0.30）：进 Judge。 */
+    /** 与分块同构的问题（分块向量取同一 embedVector，score=1.0）：进 Judge。 */
     private static final String HIGH_SCORE_QUESTION = "支付回调确认超时是多少？";
 
     @Test

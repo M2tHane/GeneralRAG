@@ -52,10 +52,7 @@ class DebugRetrievalConsistencyIT {
             fakeModel.start();
         } catch (Exception e) {
             throw new IllegalStateException("FakeOpenAiServer 启动失败", e);
-        }
-        registry.add("minio.access-key", () -> "minioadmin");
-        registry.add("minio.secret-key", () -> "minioadmin");
-        registry.add("minio.bucket", () -> "debug-it");
+        }        registry.add("minio.bucket", () -> "debug-it");
         registry.add("rag.models.chat.base-url", () -> fakeModel.baseUrl());
         registry.add("rag.models.embedding.base-url", () -> fakeModel.baseUrl());
         registry.add("rag.models.startup-check", () -> "false");

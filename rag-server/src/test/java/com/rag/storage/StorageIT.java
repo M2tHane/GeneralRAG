@@ -57,10 +57,7 @@ class StorageIT {
             "eval_dataset_item", "eval_run", "eval_run_item");
 
     @DynamicPropertySource
-    static void containerProperties(DynamicPropertyRegistry registry) {
-        registry.add("minio.access-key", () -> "minioadmin");
-        registry.add("minio.secret-key", () -> "minioadmin");
-        registry.add("minio.bucket", () -> "rag-it");
+    static void containerProperties(DynamicPropertyRegistry registry) {        registry.add("minio.bucket", () -> "rag-it");
     }
 
     @Autowired
@@ -273,8 +270,6 @@ class StorageIT {
     // ------------------------------------------------------------------
     // helper
     // ------------------------------------------------------------------
-
-
 
     private String newKb() {
         KnowledgeBaseEntity kb = new KnowledgeBaseEntity();

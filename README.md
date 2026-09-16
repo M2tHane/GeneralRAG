@@ -134,7 +134,7 @@ cd rag-server && mvn test        # 207 个测试（集成测试直连开发 Dock
 cd rag-web    && pnpm test       # vitest；pnpm e2e 需前后端同时在线
 ```
 
-> ⚠ 集成测试需要先 `docker compose up -d` 启动开发基础设施；MySQL/ES/MinIO 不可用时测试直接失败（无 Testcontainers，R4.1.2 后移除）。测试只写自己创建的数据（随机 UUID + 独立 bucket），不做全库/全索引清理。
+> ⚠ 集成测试需要先 `docker compose up -d` 启动开发基础设施；MySQL/ES/MinIO 不可用时测试直接失败（无 Testcontainers，R4.1.2 后移除）。测试只写自己创建的数据（随机 UUID + 独立 bucket），不做全库/全索引清理。test profile 与开发 ES mapping 完全一致（1024 维 + ik_max_word）；MinIO endpoint/凭据统一由环境配置提供，各 IT 仅覆盖自己的 bucket；Fake embedding 为 deterministic pseudo-random normalized vector，用于测试分数控制，不代表真实语义相似度。
 
 ## 已知局限
 

@@ -18,7 +18,9 @@ import com.sun.net.httpserver.HttpServer;
  * <p>行为：</p>
  * <ul>
  *   <li>GET  /v1/models → 模型列表</li>
- *   <li>POST /v1/embeddings → input 逐条返回 8 维伪向量（按文本哈希扰动，相似文本相近）</li>
+ *   <li>POST /v1/embeddings → input 逐条返回 1024 维 deterministic pseudo-random
+ *       测试向量（见 {@link #embedVector(String)}；用于稳定控制 retrieval 测试分数，
+ *       不模拟真实 embedding semantic similarity）</li>
  *   <li>POST /v1/chat/completions（stream=true）→ SSE delta 逐 token 输出 {@code chatAnswer}</li>
  *   <li>POST /v1/chat/completions（非流式）→ 完整 JSON</li>
  * </ul>
@@ -284,21 +286,19 @@ public class FakeOpenAiServer {
     }
 
     /**
-     * 伪向量：以文本哈希做确定性扰动，含少量公共分量，
-     * 使「文本相近 → 向量相近」的断言可成立（仅测试用途，非真实语义向量）。
-     * 维度 = {@link #DIMENSIONS}（与开发环境索引 mapping 一致）。
+     * 1024 维 deterministic pseudo-random 测试向量（维度 = {@link #DIMENSIONS}）：
+     * 同一文本 → 完全相同的向量（cos=1.0）；不同文本 → 各维近独立随机的
+     * [-1,1] 值，L2 归一化后近似正交（|cos| ≈ 0）。用于稳定控制 retrieval
+     * 测试分数（ES cosine score = (1+cos)/2：同文 ≈1.0、无关 ≈0.5），
+     * <b>不模拟真实 embedding 的语义相似度</b>。纯函数：无全局状态、
+     * 不依赖执行顺序。
      */
     public static float[] embedVector(String text) {
+        long seed = text == null ? 0L : text.hashCode(); // 32 位文本哈希作 PRNG 种子
         float[] v = new float[DIMENSIONS];
-        v[0] = 0.5f; // 公共基分量：任意两文本余弦相似度都不至于为 0
-        if (text != null && !text.isEmpty()) {
-            int h = text.hashCode();
-            // 逐维混合（Knuth 黄金比例乘数）：不相关文本在任意维度数下去相关——
-            // 旧 h>>i 方案在 32 位 int 之外全为 0，1024 维会塌缩到基分量（cos≈0.99）
-            for (int i = 1; i < DIMENSIONS; i++) {
-                int mixed = h * 31 + i * 0x9E3779B1;
-                v[i] = ((mixed >>> ((i & 3) * 8)) & 0xFF) / 255.0f;
-            }
+        for (int i = 0; i < DIMENSIONS; i++) {
+            seed = mix64(seed);
+            v[i] = toSignedUnit(seed);
         }
         float norm = 0;
         for (float x : v) norm += x * x;
@@ -307,6 +307,19 @@ public class FakeOpenAiServer {
             v[i] /= norm;
         }
         return v;
+    }
+
+    /** xorshift64* 式混合（SplitMix64 终态混合的 64 位输出，确定性、雪崩充分）。 */
+    private static long mix64(long x) {
+        x += 0x9E3779B97F4A7C15L;
+        x = (x ^ (x >>> 30)) * 0xBF58476D1CE4E5B9L;
+        x = (x ^ (x >>> 27)) * 0x94D049BB133111EBL;
+        return x ^ (x >>> 31);
+    }
+
+    /** 取 64 位状态的高位映射到 [-1, 1)（高位雪崩质量最好）。 */
+    private static float toSignedUnit(long state) {
+        return (state >>> 40) / (float) (1 << 23) - 1.0f;
     }
 
     /** 生成第 {@code idx} 位为 1 的单位向量（维度 = {@link #DIMENSIONS}）；供直写 ES 的套件使用。 */

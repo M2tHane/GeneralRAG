@@ -39,12 +39,7 @@ class OpenApiDriftTest {
     @Autowired TestRestTemplate restTemplate;
 
     @DynamicPropertySource
-    static void props(DynamicPropertyRegistry registry) {
-
-
-        registry.add("minio.access-key", () -> "minioadmin");
-        registry.add("minio.secret-key", () -> "minioadmin");
-        registry.add("minio.bucket", () -> "drift");
+    static void props(DynamicPropertyRegistry registry) {        registry.add("minio.bucket", () -> "drift");
         registry.add("rag.models.chat.base-url", () -> "http://localhost:1");
         registry.add("rag.models.embedding.base-url", () -> "http://localhost:1");
         registry.add("rag.models.startup-check", () -> "false");

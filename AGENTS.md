@@ -147,7 +147,11 @@ answerability confusion matrix + two-run comparison with comparability guard).
   ZERO containers and starts no Ryuk — if the dev stack is down, tests fail fast. Test data
   isolation: random UUID ids, per-suite MinIO buckets, dataset names with random suffix;
   no full-DB/index/bucket destructive cleanup. FakeOpenAiServer remains per-suite (stateful).
-  Test fake vectors are 1024-dim (`FakeOpenAiServer.DIMENSIONS`) to match the real index mapping.
+  Test profile matches dev ES mapping exactly: 1024-dim + ik_max_word (no analyzer override);
+  MinIO endpoint/credentials come from the shared env config, ITs override only their bucket.
+  Fake embedding is a deterministic pseudo-random L2-normalized vector (same text → cos=1.0,
+  different text → ≈orthogonal) for test score control — NOT real semantic similarity;
+  properties pinned by FakeOpenAiServerVectorTest. No test-only APIs in production code.
 
 **Dead config watch**: `rag.retrieval.refusal.insufficient-threshold` / `RAG_REFUSAL_THRESHOLD`
 were dead keys (removed in R4). Refusal thresholds are `rerank-threshold` /
