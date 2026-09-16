@@ -82,7 +82,7 @@ public class AnswerabilityPolicy {
                     null,
                     (insufficient ? "旧阈值拒答：" : "旧阈值放行：")
                             + "最高分 " + fmt(top) + "（" + scale + "）vs 阈值 " + fmt2(threshold),
-                    false, false, System.currentTimeMillis() - start);
+                    false, false, null, System.currentTimeMillis() - start);
         }
 
         // 2. 零命中：必然无证据
@@ -108,14 +108,15 @@ public class AnswerabilityPolicy {
                     : AnswerabilityDecision.judgeRefuse(result.confidence(), result.reason(), latency);
         } catch (EvidenceSufficiencyJudge.JudgeUnavailableException e) {
             long latency = System.currentTimeMillis() - start;
-            log.warn("Judge 失败，按降级策略处理（failClosed={}）：{}", cfg.isFailClosed(), e.getMessage());
+            log.warn("Judge 失败（{}），按降级策略处理（failClosed={}）：{}",
+                    e.failureType(), cfg.isFailClosed(), e.getMessage());
             if (cfg.isFailClosed()) {
-                return AnswerabilityDecision.judgeDegraded(false,
+                return AnswerabilityDecision.judgeDegraded(false, e.failureType(),
                         "Judge 失败（failClosed 保守拒答）：" + e.getMessage(), latency);
             }
             // 退回旧策略语义：按旧阈值判定（此处必为"放行"，因为低分已在步骤 3 拒掉），
             // 但显式标注 JUDGE_DEGRADED——不虚构 Judge 结果，误判上界=旧系统本身
-            return AnswerabilityDecision.judgeDegraded(true,
+            return AnswerabilityDecision.judgeDegraded(true, e.failureType(),
                     "Judge 失败，退回旧阈值行为放行（" + scale + " 阈值 " + fmt2(lowThreshold) + "）：" + e.getMessage(),
                     latency);
         }

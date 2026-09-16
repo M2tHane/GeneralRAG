@@ -27,6 +27,7 @@ import com.rag.storage.minio.ObjectStore;
 import com.rag.storage.repository.CleanupTaskRepository;
 import com.rag.storage.repository.DocumentRepository;
 import com.rag.storage.repository.IngestionTaskRepository;
+import com.rag.support.SharedInfraSupport;
 import com.rag.storage.repository.KnowledgeBaseRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,13 +38,6 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.containers.wait.strategy.HttpWaitStrategy;
-import org.testcontainers.elasticsearch.ElasticsearchContainer;
-import org.testcontainers.utility.DockerImageName;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -55,46 +49,23 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 @SpringBootTest
 @ActiveProfiles("test")
-@Testcontainers
-class StorageIT {
+class StorageIT extends SharedInfraSupport {
 
     private static final List<String> ALL_TABLES = List.of(
             "knowledge_base", "document", "ingestion_task", "cleanup_task",
             "chat_session", "chat_message", "eval_dataset", "eval_dataset_version",
             "eval_dataset_item", "eval_run", "eval_run_item");
 
-    @Container
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>(DockerImageName.parse("mysql:8"))
-            .withStartupTimeout(Duration.ofMinutes(5));
-
-    @Container
-    static final GenericContainer<?> MINIO = new GenericContainer<>(DockerImageName.parse("minio/minio:latest"))
-            .withCommand("server", "/data")
-            .withExposedPorts(9000)
-            .waitingFor(new HttpWaitStrategy()
-                    .forPort(9000)
-                    .forPath("/minio/health/ready")
-                    .forStatusCode(200))
-            .withStartupTimeout(Duration.ofMinutes(5));
-
-    @Container
-    static final ElasticsearchContainer ES = new ElasticsearchContainer(
-            // Docker Hub 的 elasticsearch 库镜像止步于 8.7；8.14.1 只有 elastic 官方仓库有
-            DockerImageName.parse("docker.elastic.co/elasticsearch/elasticsearch:8.14.1"))
-            .withEnv("xpack.security.enabled", "false")
-            .withEnv("xpack.security.http.ssl.enabled", "false")
-            .withEnv("ES_JAVA_OPTS", "-Xms512m -Xmx512m")
-            .withStartupTimeout(Duration.ofMinutes(6));
-
     @DynamicPropertySource
     static void containerProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
-        registry.add("spring.datasource.username", MYSQL::getUsername);
-        registry.add("spring.datasource.password", MYSQL::getPassword);
+        acquire();
+        registry.add("spring.datasource.url", mysql()::getJdbcUrl);
+        registry.add("spring.datasource.username", mysql()::getUsername);
+        registry.add("spring.datasource.password", mysql()::getPassword);
         registry.add("spring.elasticsearch.uris",
-                () -> "http://" + ES.getHost() + ":" + ES.getMappedPort(9200));
+                () -> "http://" + es().getHost() + ":" + es().getMappedPort(9200));
         registry.add("minio.endpoint",
-                () -> "http://" + MINIO.getHost() + ":" + MINIO.getMappedPort(9000));
+                () -> "http://" + minio().getHost() + ":" + minio().getMappedPort(9000));
         registry.add("minio.access-key", () -> "minioadmin");
         registry.add("minio.secret-key", () -> "minioadmin");
         registry.add("minio.bucket", () -> "rag-it");

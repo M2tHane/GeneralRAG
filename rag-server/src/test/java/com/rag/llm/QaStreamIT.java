@@ -10,6 +10,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.rag.config.RagProperties;
 import com.rag.support.FakeOpenAiServer;
+import com.rag.support.SharedInfraSupport;
 import com.rag.domain.entity.ChatMessageEntity;
 import com.rag.domain.entity.ChatSessionEntity;
 import com.rag.domain.entity.DocumentEntity;
@@ -43,11 +44,6 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.containers.wait.strategy.HttpWaitStrategy;
-import org.testcontainers.elasticsearch.ElasticsearchContainer;
-import org.testcontainers.utility.DockerImageName;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -59,21 +55,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-class QaStreamIT {
-
-    private static final MySQLContainer<?> MYSQL = new MySQLContainer<>(DockerImageName.parse("mysql:8"))
-            .withStartupTimeout(Duration.ofMinutes(5));
-    private static final GenericContainer<?> MINIO = new GenericContainer<>(DockerImageName.parse("minio/minio:latest"))
-            .withCommand("server", "/data")
-            .withExposedPorts(9000)
-            .waitingFor(new HttpWaitStrategy().forPort(9000).forPath("/minio/health/ready").forStatusCode(200))
-            .withStartupTimeout(Duration.ofMinutes(5));
-    private static final ElasticsearchContainer ES = new ElasticsearchContainer(
-            DockerImageName.parse("docker.elastic.co/elasticsearch/elasticsearch:8.14.1"))
-            .withEnv("xpack.security.enabled", "false")
-            .withEnv("xpack.security.http.ssl.enabled", "false")
-            .withEnv("ES_JAVA_OPTS", "-Xms512m -Xmx512m")
-            .withStartupTimeout(Duration.ofMinutes(6));
+class QaStreamIT extends SharedInfraSupport {
 
     /** OpenAI 兼容假模型服务：/v1/embeddings 返回 8 维向量；/v1/chat/completions 流式返回。 */
     private static FakeOpenAiServer fakeModel;
@@ -90,23 +72,16 @@ class QaStreamIT {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry registry) {
-        // 先启动假模型与容器再注册属性
-        try {
-            fakeModel = new FakeOpenAiServer();
-            fakeModel.start();
-        } catch (Exception e) {
-            throw new IllegalStateException("FakeOpenAiServer 启动失败", e);
-        }
-        MYSQL.start();
-        MINIO.start();
-        ES.start();
-        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
-        registry.add("spring.datasource.username", MYSQL::getUsername);
-        registry.add("spring.datasource.password", MYSQL::getPassword);
+        // 先启动假模型与容器再注册属性（容器为共享单例，见 SharedInfraSupport）
+        fakeModel = newFakeModel();
+        acquire();
+        registry.add("spring.datasource.url", mysql()::getJdbcUrl);
+        registry.add("spring.datasource.username", mysql()::getUsername);
+        registry.add("spring.datasource.password", mysql()::getPassword);
         registry.add("spring.elasticsearch.uris",
-                () -> "http://" + ES.getHost() + ":" + ES.getMappedPort(9200));
+                () -> "http://" + es().getHost() + ":" + es().getMappedPort(9200));
         registry.add("minio.endpoint",
-                () -> "http://" + MINIO.getHost() + ":" + MINIO.getMappedPort(9000));
+                () -> "http://" + minio().getHost() + ":" + minio().getMappedPort(9000));
         registry.add("minio.access-key", () -> "minioadmin");
         registry.add("minio.secret-key", () -> "minioadmin");
         registry.add("minio.bucket", () -> "qa-it");
@@ -129,6 +104,7 @@ class QaStreamIT {
         if (fakeModel != null) {
             fakeModel.stop();
         }
+        release();
     }
 
     // ------------------------------------------------------------------

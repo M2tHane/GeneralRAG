@@ -234,8 +234,11 @@ public class ChatStreamService {
         boolean rerankApplied = diag.rerankApplied();
         Context context = contextAssembler.assemble(passed);
         long judgeStart = System.currentTimeMillis();
+        // R4.1.1：history 必须传给 Judge（解析 FOLLOW_UP 指代），而非只给生成——
+        // 历史仅进 Judge 提示词的指代解析区，不构成证据（evidence 仍只来自 context）
         com.rag.answerability.AnswerabilityDecision decision = answerabilityPolicy.evaluate(
-                com.rag.answerability.AnswerabilityInput.of(question, context, hits, diag.mode(), rerankApplied));
+                new com.rag.answerability.AnswerabilityInput(
+                        question, history, context, hits, diag.mode(), rerankApplied));
         long answerabilityMs = System.currentTimeMillis() - judgeStart;
         if (!decision.answerable()) {
             return new AnswerResult(refusalPolicy.refusalAnswer(), List.of(), hits,
@@ -307,8 +310,22 @@ public class ChatStreamService {
     // SSE 事件载荷（与 contracts/openapi.yaml StreamEvent* 一字不差）
     // ==================================================================
 
+    /**
+     * SSE 事件载荷（与 contracts/openapi.yaml StreamEvent* 一字不差）。
+     *
+     * <p>R4.1.1：ANSWERABILITY_CHECKED stage 携带机器可读的判定枚举
+     * （decisionType 必有；judgeFailureType 仅 degraded 时非 null）——
+     * 冒烟/监控可结构化统计，不必解析 detail 文案。故意<b>不</b>暴露
+     * confidence / reason / prompt / evidence（自由文本不进用户侧 SSE）。</p>
+     */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    record StageEvent(String stage, String detail, Long elapsedMs) {
+    record StageEvent(String stage, String detail, Long elapsedMs,
+                      String decisionType, String judgeFailureType) {
+
+        /** 常规 stage（无判定枚举）。 */
+        StageEvent(String stage, String detail, Long elapsedMs) {
+            this(stage, detail, elapsedMs, null, null);
+        }
     }
 
     record TokenEvent(String delta) {
@@ -348,9 +365,10 @@ public class ChatStreamService {
             RetrievalPipeline.RetrievalDiagnostics diag = outcome.diagnostics();
             boolean rerankApplied = diag.rerankApplied();
             Context context = contextAssembler.assemble(passed);
+            // R4.1.1：流式路径同样把 session history 传给 Judge（指代解析，非证据）
             com.rag.answerability.AnswerabilityDecision decision = answerabilityPolicy.evaluate(
-                    com.rag.answerability.AnswerabilityInput.of(
-                            state.question, context, hits, diag.mode(), rerankApplied));
+                    new com.rag.answerability.AnswerabilityInput(
+                            state.question, state.history, context, hits, diag.mode(), rerankApplied));
             boolean insufficient = !decision.answerable();
             state.refusal = insufficient;
             state.citations = insufficient ? List.of() : buildCitations(passed);
@@ -381,9 +399,12 @@ public class ChatStreamService {
                 return;
             }
 
-            // R4/R4.1：Answerability 判定完成的进度表达（仅进度，confidence/reason 不进 SSE 用户内容）
+            // R4/R4.1：Answerability 判定完成的进度表达（confidence/reason 不进 SSE 用户内容；
+            // R4.1.1 额外携带机器可读枚举供冒烟/监控统计）
             send(state, "stage", new StageEvent("ANSWERABILITY_CHECKED",
-                    decisionLabel(decision), decision.latencyMs()));
+                    decisionLabel(decision), decision.latencyMs(),
+                    decision.decisionType().name(),
+                    decision.failureType() == null ? null : decision.failureType().name()));
             if (state.terminal.get()) {
                 return;
             }

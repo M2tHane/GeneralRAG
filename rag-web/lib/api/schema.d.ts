@@ -376,9 +376,11 @@ export interface paths {
          * 导入评测数据集（JSON 或 CSV 文件，产生新版本）
          * @description multipart 上传：按文件扩展名/内容识别 .json 或 .csv。每次导入在该数据集下产生一个
          *     不可变版本（versionNo 递增）。字段：question（必填）、referenceAnswer、evidence
-         *     （相关文档/证据引用数组）、answerable（是否可回答）、category
-         *     （DIRECT/TERM_VARIATION/FOLLOW_UP/OUT_OF_KB/CONFUSABLE）。JSON 文件为对象数组；
-         *     CSV 表头须与字段同名（evidence 列为 JSON 字符串）。
+         *     （相关文档/证据引用数组）、history（可选，[{role: user|assistant, content}] 时间正序，
+         *     R4.1 起支持——FOLLOW_UP 类样本提供会话历史以解析指代；历史仅用于理解当前问题，
+         *     不构成回答证据，检索仍只使用当前问题）、answerable（是否可回答）、category
+         *     （DIRECT/TERM_VARIATION/FOLLOW_UP/OUT_OF_KB/CONFUSABLE/PARTIAL_EVIDENCE）。
+         *     JSON 文件为对象数组；CSV 表头须与字段同名（evidence/history 列为 JSON 字符串）。
          */
         post: operations["importEvalDataset"];
         delete?: never;
@@ -712,6 +714,20 @@ export interface components {
             /** @description 如 “命中 6 块 · 128ms”；ANSWERABILITY_CHECKED 为 “证据充分性判定：可回答 · Judge 812ms” 之类的简述（不含 confidence/reason，详见调试与评测接口） */
             detail?: string;
             elapsedMs?: number;
+            /**
+             * @description R4.1.1：仅 ANSWERABILITY_CHECKED 事件携带的机器可读判定枚举（其余 stage
+             *     不含该字段）。与评测/调试接口的 AnswerabilityDecisionType 同源；
+             *     冒烟与监控据此统计，不需要解析 detail 文案。自由文本
+             *     （confidence/reason/prompt/evidence）刻意不出现在 SSE。
+             * @enum {string}
+             */
+            decisionType?: "LOW_SCORE_REFUSAL" | "NO_HITS" | "JUDGE_ACCEPT" | "JUDGE_REFUSE" | "JUDGE_DEGRADED" | "ANSWERABILITY_DISABLED";
+            /**
+             * @description R4.1.1：仅 decisionType=JUDGE_DEGRADED 时携带的二级故障枚举
+             *     （TIMEOUT/OVERLOADED/MODEL_ERROR/INVALID_RESPONSE）；其余情况字段缺省。
+             * @enum {string}
+             */
+            judgeFailureType?: "TIMEOUT" | "OVERLOADED" | "MODEL_ERROR" | "INVALID_RESPONSE";
         };
         StreamEventToken: {
             /** @description 回答文本增量 */
@@ -812,12 +828,19 @@ export interface components {
          *     LOW_SCORE_REFUSAL=低于低分阈值直接拒答（未调 Judge）；NO_HITS=零命中直接拒答；
          *     JUDGE_ACCEPT/JUDGE_REFUSE=灰区与高分由 Evidence Sufficiency Judge 判定
          *     （R4 Baseline 证明高分不可答与可答分数完全重叠，不存在安全的"高分直答"阈值）；
-         *     JUDGE_DEGRADED=Judge 失败按降级策略处理（原因为 TIMEOUT/OVERLOADED/MODEL_ERROR/
-         *     INVALID_RESPONSE，见 decision reason 前缀）；ANSWERABILITY_DISABLED=判定关闭
-         *     （仅对照，行为同旧 RefusalPolicy）。
+         *     JUDGE_DEGRADED=Judge 失败按降级策略处理（二级结构化原因见
+         *     AnswerabilityFailureType；decision reason 保留人类可读前缀）；ANSWERABILITY_DISABLED=
+         *     判定关闭（仅对照，行为同旧 RefusalPolicy）。
          * @enum {string}
          */
         AnswerabilityDecisionType: "LOW_SCORE_REFUSAL" | "NO_HITS" | "JUDGE_ACCEPT" | "JUDGE_REFUSE" | "JUDGE_DEGRADED" | "ANSWERABILITY_DISABLED";
+        /**
+         * @description R4.1.1：Judge 系统故障的结构化二级分类（仅 decisionType=JUDGE_DEGRADED 时携带）。
+         *     TIMEOUT=Judge HTTP 超时；OVERLOADED=bulkhead 容量耗尽；MODEL_ERROR=模型调用异常；
+         *     INVALID_RESPONSE=响应非法。指标统计以此为准，不依赖 reason 文本前缀。
+         * @enum {string}
+         */
+        AnswerabilityFailureType: "TIMEOUT" | "OVERLOADED" | "MODEL_ERROR" | "INVALID_RESPONSE";
         AnswerabilityDecision: {
             /** @description 判定结果：证据是否足以完整回答（true=进入生成） */
             answerable: boolean;
@@ -830,6 +853,8 @@ export interface components {
             judgeInvoked: boolean;
             /** @description Judge 是否失败降级（超时/不可用/解析失败）；降级行为由配置决定（failClosed=拒答 / failOpen=放行生成） */
             degraded: boolean;
+            /** @description 降级二级结构化原因（R4.1.1）；仅 degraded=true 时非 null，其余为 null */
+            failureType?: components["schemas"]["AnswerabilityFailureType"] | null;
             /** @description 判定耗时（毫秒，含 Judge 调用）；门控路径为门控本身耗时（≈0） */
             latencyMs?: number | null;
         };

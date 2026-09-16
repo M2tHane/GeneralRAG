@@ -20,17 +20,13 @@ import com.rag.storage.minio.ObjectStore;
 import com.rag.storage.repository.DocumentRepository;
 import com.rag.storage.repository.IngestionTaskRepository;
 import com.rag.storage.repository.KnowledgeBaseRepository;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.containers.wait.strategy.HttpWaitStrategy;
-import org.testcontainers.elasticsearch.ElasticsearchContainer;
-import org.testcontainers.utility.DockerImageName;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -40,21 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @ActiveProfiles("test")
-class IngestionPipelineIT {
-
-    private static final MySQLContainer<?> MYSQL = new MySQLContainer<>(DockerImageName.parse("mysql:8"))
-            .withStartupTimeout(Duration.ofMinutes(5));
-    private static final GenericContainer<?> MINIO = new GenericContainer<>(DockerImageName.parse("minio/minio:latest"))
-            .withCommand("server", "/data")
-            .withExposedPorts(9000)
-            .waitingFor(new HttpWaitStrategy().forPort(9000).forPath("/minio/health/ready").forStatusCode(200))
-            .withStartupTimeout(Duration.ofMinutes(5));
-    private static final ElasticsearchContainer ES = new ElasticsearchContainer(
-            DockerImageName.parse("docker.elastic.co/elasticsearch/elasticsearch:8.14.1"))
-            .withEnv("xpack.security.enabled", "false")
-            .withEnv("xpack.security.http.ssl.enabled", "false")
-            .withEnv("ES_JAVA_OPTS", "-Xms512m -Xmx512m")
-            .withStartupTimeout(Duration.ofMinutes(6));
+class IngestionPipelineIT extends com.rag.support.SharedInfraSupport {
 
     private static com.rag.support.FakeOpenAiServer fakeModel;
 
@@ -67,28 +49,29 @@ class IngestionPipelineIT {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry registry) {
-        try {
-            fakeModel = new com.rag.support.FakeOpenAiServer();
-            fakeModel.start();
-        } catch (Exception e) {
-            throw new IllegalStateException("FakeOpenAiServer 启动失败", e);
-        }
-        MYSQL.start();
-        MINIO.start();
-        ES.start();
-        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
-        registry.add("spring.datasource.username", MYSQL::getUsername);
-        registry.add("spring.datasource.password", MYSQL::getPassword);
+        fakeModel = newFakeModel();
+        acquire();
+        registry.add("spring.datasource.url", mysql()::getJdbcUrl);
+        registry.add("spring.datasource.username", mysql()::getUsername);
+        registry.add("spring.datasource.password", mysql()::getPassword);
         registry.add("spring.elasticsearch.uris",
-                () -> "http://" + ES.getHost() + ":" + ES.getMappedPort(9200));
+                () -> "http://" + es().getHost() + ":" + es().getMappedPort(9200));
         registry.add("minio.endpoint",
-                () -> "http://" + MINIO.getHost() + ":" + MINIO.getMappedPort(9000));
+                () -> "http://" + minio().getHost() + ":" + minio().getMappedPort(9000));
         registry.add("minio.access-key", () -> "minioadmin");
         registry.add("minio.secret-key", () -> "minioadmin");
         registry.add("minio.bucket", () -> "ing-it");
         registry.add("rag.models.embedding.base-url", () -> fakeModel.baseUrl());
         registry.add("rag.models.chat.base-url", () -> fakeModel.baseUrl());
         registry.add("rag.models.startup-check", () -> "false");
+    }
+
+    @AfterAll
+    static void tearDown() {
+        if (fakeModel != null) {
+            fakeModel.stop();
+        }
+        release();
     }
 
     private String newKb() {

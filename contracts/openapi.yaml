@@ -1126,6 +1126,20 @@ components:
           type: string
           description: 如 “命中 6 块 · 128ms”；ANSWERABILITY_CHECKED 为 “证据充分性判定：可回答 · Judge 812ms” 之类的简述（不含 confidence/reason，详见调试与评测接口）
         elapsedMs: { type: integer }
+        decisionType:
+          type: string
+          description: |
+            R4.1.1：仅 ANSWERABILITY_CHECKED 事件携带的机器可读判定枚举（其余 stage
+            不含该字段）。与评测/调试接口的 AnswerabilityDecisionType 同源；
+            冒烟与监控据此统计，不需要解析 detail 文案。自由文本
+            （confidence/reason/prompt/evidence）刻意不出现在 SSE。
+          enum: [LOW_SCORE_REFUSAL, NO_HITS, JUDGE_ACCEPT, JUDGE_REFUSE, JUDGE_DEGRADED, ANSWERABILITY_DISABLED]
+        judgeFailureType:
+          type: string
+          description: |
+            R4.1.1：仅 decisionType=JUDGE_DEGRADED 时携带的二级故障枚举
+            （TIMEOUT/OVERLOADED/MODEL_ERROR/INVALID_RESPONSE）；其余情况字段缺省。
+          enum: [TIMEOUT, OVERLOADED, MODEL_ERROR, INVALID_RESPONSE]
     StreamEventToken:
       type: object
       required: [delta]
@@ -1242,10 +1256,17 @@ components:
         LOW_SCORE_REFUSAL=低于低分阈值直接拒答（未调 Judge）；NO_HITS=零命中直接拒答；
         JUDGE_ACCEPT/JUDGE_REFUSE=灰区与高分由 Evidence Sufficiency Judge 判定
         （R4 Baseline 证明高分不可答与可答分数完全重叠，不存在安全的"高分直答"阈值）；
-        JUDGE_DEGRADED=Judge 失败按降级策略处理（原因为 TIMEOUT/OVERLOADED/MODEL_ERROR/
-        INVALID_RESPONSE，见 decision reason 前缀）；ANSWERABILITY_DISABLED=判定关闭
-        （仅对照，行为同旧 RefusalPolicy）。
+        JUDGE_DEGRADED=Judge 失败按降级策略处理（二级结构化原因见
+        AnswerabilityFailureType；decision reason 保留人类可读前缀）；ANSWERABILITY_DISABLED=
+        判定关闭（仅对照，行为同旧 RefusalPolicy）。
       enum: [LOW_SCORE_REFUSAL, NO_HITS, JUDGE_ACCEPT, JUDGE_REFUSE, JUDGE_DEGRADED, ANSWERABILITY_DISABLED]
+    AnswerabilityFailureType:
+      type: string
+      description: |
+        R4.1.1：Judge 系统故障的结构化二级分类（仅 decisionType=JUDGE_DEGRADED 时携带）。
+        TIMEOUT=Judge HTTP 超时；OVERLOADED=bulkhead 容量耗尽；MODEL_ERROR=模型调用异常；
+        INVALID_RESPONSE=响应非法。指标统计以此为准，不依赖 reason 文本前缀。
+      enum: [TIMEOUT, OVERLOADED, MODEL_ERROR, INVALID_RESPONSE]
     AnswerabilityDecision:
       type: object
       required: [answerable, decisionType, judgeInvoked, degraded]
@@ -1264,6 +1285,11 @@ components:
         degraded:
           type: boolean
           description: Judge 是否失败降级（超时/不可用/解析失败）；降级行为由配置决定（failClosed=拒答 / failOpen=放行生成）
+        failureType:
+          allOf:
+            - $ref: "#/components/schemas/AnswerabilityFailureType"
+          nullable: true
+          description: 降级二级结构化原因（R4.1.1）；仅 degraded=true 时非 null，其余为 null
         latencyMs:
           type: integer
           nullable: true

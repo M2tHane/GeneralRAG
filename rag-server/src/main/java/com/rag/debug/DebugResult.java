@@ -68,20 +68,21 @@ public final class DebugResult {
     }
 
     /**
-     * 契约 AnswerabilityDecision（R4）：证据充分性判定结果。
+     * 契约 AnswerabilityDecision（R4 / R4.1.1）：证据充分性判定结果。
      *
-     * @param answerable   证据是否足以完整回答
-     * @param decisionType 决策类型（AnswerabilityDecisionType 枚举名）
-     * @param confidence   Judge 置信度；未调 Judge 为 null
-     * @param reason       决策原因；未调 Judge 时是门控说明（不伪造 Judge reason）
-     * @param judgeInvoked 是否实际调用了 Judge
-     * @param degraded     Judge 是否失败降级
-     * @param latencyMs    判定耗时（毫秒）
+     * @param answerable      证据是否足以完整回答
+     * @param decisionType    决策类型（AnswerabilityDecisionType 枚举名）
+     * @param confidence      Judge 置信度；未调 Judge 为 null
+     * @param reason          决策原因；未调 Judge 时是门控说明（不伪造 Judge reason）
+     * @param judgeInvoked    是否实际调用了 Judge
+     * @param degraded        Judge 是否失败降级
+     * @param failureType     降级二级原因枚举名（R4.1.1）；仅 degraded=true 时非 null
+     * @param latencyMs       判定耗时（毫秒）
      */
     public record AnswerabilityDecisionPayload(boolean answerable, String decisionType,
                                                Double confidence, String reason,
                                                boolean judgeInvoked, boolean degraded,
-                                               long latencyMs) {
+                                               String failureType, long latencyMs) {
     }
 
     public record DebugRetrievalResult(EffectiveConfig effectiveConfig, List<HitPayload> hits,

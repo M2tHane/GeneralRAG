@@ -103,8 +103,11 @@ rag:
       # 证据不足即拒答并清空引用（R2-A1）；关闭仅用于与第一轮行为做对照
       enabled: ${RAG_REFUSAL_ENABLED:true}
       # 双口径阈值：重排生效时用 rerank 阈值（默认模式）；降级/未启用重排时用 cosine 阈值
-      # （校准依据见 docs/round2/01-需求理解.md；余弦口径区分度弱，只能过滤明显不相关）
-      rerank-threshold: ${RAG_REFUSAL_RERANK_THRESHOLD:0.65}
+      # （余弦口径区分度弱，只能过滤明显不相关）。
+      # rerank 阈值基于当前 qwen3.7-text-rerank + 当前 eval corpus 校准（R4.1 sweep，
+      # 依据 docs/round4/04-R4.1评测与校准.md §B）。
+      # ⚠ 更换 rerank 模型或语料分布后必须重新校准，不能直接复用该数值。
+      rerank-threshold: ${RAG_REFUSAL_RERANK_THRESHOLD:0.75}
       cosine-threshold: ${RAG_REFUSAL_COSINE_THRESHOLD:0.30}
     answerability:
       # R4：证据充分性判定（低分直拒 → 其余交给 Judge；数据依据 docs/round4/01-Baseline分析.md）

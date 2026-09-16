@@ -180,14 +180,16 @@ public class EvalRunExecutor {
         // R2-E2：Recall@5 = 命中的证据分块数 / 参考证据分块总数
         int evidenceTotal = 0;
         int evidenceCovered = 0;
-        // R2-E3：拒答正确率 = (资料外题正确拒答 + 资料内题未误拒) / 全部题
+        // R2-E3：拒答正确率 = (资料外题正确拒答 + 资料内题未误拒) / 参与判定题数
+        // R4.1.1 统计口径拆分：
+        //   executedCount  = 成功执行完成的题（含 Judge degraded，不含执行异常）
+        //   evaluatedCount = 可进入 TP/FP/FN/TN 的题 = executedCount - degradedCount
+        // 质量指标（混淆矩阵/FAR/FRR/refusalAccuracy）只用 evaluatedCount 样本；
+        // 成本指标（judgeInvocationRate）用 executedCount——degraded 也真实消耗了
+        // 一次 Judge 调用尝试，不能从分母里消失。
+        int executedCount = 0;
+        int evaluatedCount = 0;
         int refusalCorrect = 0;
-        int refusalTotal = 0;
-        // R4：Answerability 混淆矩阵与 Judge 成本统计
-        // R4.1 语义修正：Judge 降级（TIMEOUT/OVERLOADED/MODEL_ERROR/INVALID_RESPONSE）
-        // 属系统故障而非拒答能力——degraded 题不计入 TP/FP/FN/TN 与 refusalAccuracy
-        // （否则 failClosed=true 时故障会被算成 Correct Refusal 虚假提升指标），
-        // 单独按 decisionType 细分统计，在 answerabilityConfusion.degraded 中透出。
         int judgeInvokedCount = 0;
         int judgeDegradedCount = 0;
         Map<String, Integer> degradedByType = new java.util.LinkedHashMap<>();
@@ -196,11 +198,16 @@ public class EvalRunExecutor {
         int fpCount = 0;
         int fnCount = 0;
         int tnCount = 0;
+        // R4.1.1：数据集事实统计——OUT_OF_KB 题数只看数据集标签，不受执行/降级影响
+        int outOfKbCount = 0;
         // R4：按类别拆分（定位哪类题出错）
         Map<String, int[]> categoryStats = new java.util.LinkedHashMap<>();
         List<Integer> latencies = new java.util.ArrayList<>();
 
         for (EvalDatasetItemEntity item : datasetItems) {
+            if (!item.isAnswerable()) {
+                outOfKbCount++;
+            }
             EvalRunItemEntity runItem = runItemRepository
                     .findByRunIdAndSeq(run.getId(), item.getSeq()).orElse(null);
             if (runItem == null) {
@@ -267,36 +274,42 @@ public class EvalRunExecutor {
             }
 
             // R2-E3：拒答正确率（answerable=false 应拒；answerable=true 不应拒）
-            // R4.1：degraded 题（Judge 系统故障）不计入混淆矩阵与拒答正确率——
-            // 故障既不是"正确拒答"也不是"误拒"，混入会系统性污染两类指标
+            // R4.1/R4.1.1：执行失败与 degraded 题（Judge 系统故障）都不计入混淆矩阵、
+            // 拒答正确率与类别拆分——故障既不是"正确拒答"也不是"误拒"，混入会
+            // 系统性污染质量指标；degraded 只体现在 executedCount/degraded 明细中。
             boolean degraded = answer != null && answer.answerability() != null
                     && answer.answerability().degraded();
-            if (!executionFailed && !degraded) {
-                refusalTotal++;
-                boolean refused = answer != null && answer.refusal();
-                if (item.isAnswerable() == !refused) {
-                    refusalCorrect++;
-                }
-                if (refused) {
-                    if (item.isAnswerable()) {
-                        fnCount++;
-                    } else {
-                        tnCount++;
-                    }
-                } else if (item.isAnswerable()) {
-                    tpCount++;
+            if (!executionFailed) {
+                executedCount++;
+                if (degraded) {
+                    // 系统故障：计入 executed（Judge 调用已消耗），不计入 evaluated
                 } else {
-                    fpCount++;
-                }
-                // R4：类别拆分统计（expectedAnswerable / refused / misjudged）
-                String catKey = item.getCategory() == null ? "UNKNOWN" : item.getCategory().name();
-                int[] stat = categoryStats.computeIfAbsent(catKey, k -> new int[3]);
-                stat[0]++; // 样本数
-                if (refused) {
-                    stat[1]++; // 拒答数
-                }
-                if (item.isAnswerable() == refused) {
-                    stat[2]++; // 判错数（应答被拒 + 不应答被答）
+                    evaluatedCount++;
+                    boolean refused = answer != null && answer.refusal();
+                    if (item.isAnswerable() == !refused) {
+                        refusalCorrect++;
+                    }
+                    if (refused) {
+                        if (item.isAnswerable()) {
+                            fnCount++;
+                        } else {
+                            tnCount++;
+                        }
+                    } else if (item.isAnswerable()) {
+                        tpCount++;
+                    } else {
+                        fpCount++;
+                    }
+                    // R4：类别拆分统计（expectedAnswerable / refused / misjudged）
+                    String catKey = item.getCategory() == null ? "UNKNOWN" : item.getCategory().name();
+                    int[] stat = categoryStats.computeIfAbsent(catKey, k -> new int[3]);
+                    stat[0]++; // 样本数
+                    if (refused) {
+                        stat[1]++; // 拒答数
+                    }
+                    if (item.isAnswerable() == refused) {
+                        stat[2]++; // 判错数（应答被拒 + 不应答被答）
+                    }
                 }
             }
 
@@ -325,7 +338,8 @@ public class EvalRunExecutor {
                     runItem.setAnswerabilityLatencyMs(toIntMs(dec.latencyMs()));
                     if (dec.degraded()) {
                         judgeDegradedCount++;
-                        String type = dec.decisionType() == null ? "UNKNOWN" : dec.decisionType().name();
+                        // R4.1.1：结构化 failureType 计数（不再依赖 reason 文本前缀）
+                        String type = dec.failureType() == null ? "UNKNOWN" : dec.failureType().name();
                         degradedByType.merge(type, 1, Integer::sum);
                     }
                     if (dec.judgeInvoked()) {
@@ -338,7 +352,6 @@ public class EvalRunExecutor {
 
             totalLatency += latencyMs;
             latencies.add(latencyMs);
-            executed++;
         }
 
         latencies.sort(null);
@@ -357,32 +370,37 @@ public class EvalRunExecutor {
         }
         rankDist.put("notFound", notFound);
         metrics.put("rankDistribution", rankDist);
-        // R2-E3：拒答正确率独立成指标
-        metrics.put("refusalAccuracy", refusalTotal == 0 ? null
-                : round4((double) refusalCorrect / refusalTotal));
+        // R2-E3：拒答正确率独立成指标（分母 = evaluatedCount，仅参与判定的题）
+        metrics.put("refusalAccuracy", evaluatedCount == 0 ? null
+                : round4((double) refusalCorrect / evaluatedCount));
         metrics.put("answerableCount", answerableCount);
-        metrics.put("outOfKbCount", refusalTotal - answerableCount);
+        // R4.1.1：数据集事实统计——不受执行/降级影响（此前 = refusalTotal - answerableCount，
+        // 在 degraded 出现时会与数据集标签集合不一致）
+        metrics.put("outOfKbCount", outOfKbCount);
+        // R4.1.1：执行/判定分母分离（口径见 executeItems 注释）
+        metrics.put("executedCount", executedCount);
+        metrics.put("evaluatedCount", evaluatedCount);
         // R4：Answerability 混淆矩阵（逐题累计：TP=应答且答 FP=不应答却答 FN=应答却拒 TN=不应答且拒；
-        // degraded 题 = 系统故障，不计入四格，单独透出 decisionType 细分）
-        metrics.put("answerabilityConfusion", confusionMetrics(refusalTotal, judgeInvokedCount,
-                judgeDegradedCount, judgeLatencySum, categoryStats, tpCount, fpCount, fnCount, tnCount,
-                degradedByType));
+        // degraded 题 = 系统故障，不计入四格，单独透出 failureType 细分）
+        metrics.put("answerabilityConfusion", confusionMetrics(executedCount, evaluatedCount,
+                judgeInvokedCount, judgeDegradedCount, judgeLatencySum, categoryStats,
+                tpCount, fpCount, fnCount, tnCount, degradedByType));
         // R2-L1：耗时拆分与分位数
-        metrics.put("avgLatencyMs", executed == 0 ? null : round4((double) totalLatency / executed));
-        metrics.put("retrievalMsAvg", executed == 0 ? null : round4((double) totalRetrieval / executed));
-        metrics.put("generationMsAvg", executed == 0 ? null : round4((double) totalGeneration / executed));
+        metrics.put("avgLatencyMs", executedCount == 0 ? null : round4((double) totalLatency / executedCount));
+        metrics.put("retrievalMsAvg", executedCount == 0 ? null : round4((double) totalRetrieval / executedCount));
+        metrics.put("generationMsAvg", executedCount == 0 ? null : round4((double) totalGeneration / executedCount));
         metrics.put("latencyP50Ms", percentile(latencies, 0.50));
         metrics.put("latencyP95Ms", percentile(latencies, 0.95));
         metrics.put("latencyMaxMs", latencies.isEmpty() ? null : latencies.get(latencies.size() - 1));
-        metrics.put("itemCount", executed);
+        metrics.put("itemCount", executedCount);
 
         run.setStatus(EvalRunStatus.COMPLETED);
         run.setMetrics(metrics);
         run.setFinishedAt(java.time.LocalDateTime.now());
         runRepository.save(run);
-        log.info("评测运行完成 runId={} itemCount={} answerable={} hitAt1={} hitAt3={} hitAt5={} "
-                        + "recallAt5={} mrr={} refusalAcc={}",
-                run.getId(), executed, answerableCount,
+        log.info("评测运行完成 runId={} itemCount={} executed={} evaluated={} answerable={} "
+                        + "hitAt1={} hitAt3={} hitAt5={} recallAt5={} mrr={} refusalAcc={}",
+                run.getId(), executedCount, executedCount, evaluatedCount, answerableCount,
                 metrics.get("hitAt1"), metrics.get("hitAt3"), metrics.get("hitAt5"),
                 metrics.get("recallAt5"), metrics.get("mrr"), metrics.get("refusalAccuracy"));
     }
@@ -423,26 +441,29 @@ public class EvalRunExecutor {
     /**
      * R4 Answerability 混淆矩阵与派生指标。
      *
-     * <p>定义（False Answer Rate 是本轮核心指标——企业知识库中"没答案却自信回答"
+     * <p>定义（False Answer Rate 是核心指标——企业知识库中"没答案却自信回答"
      * 比偶尔误拒风险更高）：</p>
      * <ul>
      *   <li>falseAnswerRate = FP/(FP+TN)：实际不可回答的问题中被错误回答的比例</li>
      *   <li>falseRefusalRate = FN/(FN+TP)：实际可回答的问题中被错误拒答的比例</li>
      *   <li>answerablePrecision = TP/(TP+FP)；answerableRecall = TP/(TP+FN)</li>
      *   <li>refusalPrecision = TN/(TN+FN)；refusalRecall = TN/(TN+FP)</li>
-     *   <li>judgeInvocationRate = 调 Judge 题数 / 已执行题数（成本）</li>
-     *   <li>judgeDegradedRate = Judge 降级题数 / 已调 Judge 题数（可用性）</li>
+     *   <li>judgeInvocationRate = judgeInvoked / executedCount（成本口径，R4.1.1）——
+     *       degraded（TIMEOUT/OVERLOADED 等）也真实消耗了一次 Judge 调用尝试，
+     *       分母必须是 executedCount 而非 evaluatedCount</li>
+     *   <li>judgeDegradedRate = judgeDegraded / judgeInvoked（可用性）</li>
      * </ul>
      *
      * <p>R4.1 语义修正：{@code degraded} 题（Judge TIMEOUT/OVERLOADED/MODEL_ERROR/
      * INVALID_RESPONSE）是<b>系统故障</b>而非判定能力——不进 TP/FP/FN/TN，
      * 也不进 falseAnswerRate / falseRefusalRate / refusalAccuracy；否则
      * failClosed=true 时每次故障都被记成 Correct Refusal，指标被系统性高估。
-     * 降级明细按 decisionType 计数，在 {@code degraded} 字段透出（总量
-     * {@code judgeDegradedRate} 不变，可与明细相互印证）。</p>
+     * R4.1.1：降级明细按结构化 {@link com.rag.answerability.JudgeFailureType} 计数，
+     * 在 {@code degraded} 字段透出，不再依赖 reason 文本前缀。</p>
      */
-    private static Map<String, Object> confusionMetrics(int executed, int judgeInvoked,
-                                                        int judgeDegraded, long judgeLatencySum,
+    private static Map<String, Object> confusionMetrics(int executedCount, int evaluatedCount,
+                                                        int judgeInvoked, int judgeDegraded,
+                                                        long judgeLatencySum,
                                                         Map<String, int[]> categoryStats,
                                                         int tp, int fp, int fn, int tn,
                                                         Map<String, Integer> degradedByType) {
@@ -451,13 +472,15 @@ public class EvalRunExecutor {
         m.put("fp", fp);
         m.put("fn", fn);
         m.put("tn", tn);
+        m.put("executedCount", executedCount);
+        m.put("evaluatedCount", evaluatedCount);
         m.put("falseAnswerRate", (fp + tn) == 0 ? null : round4((double) fp / (fp + tn)));
         m.put("falseRefusalRate", (fn + tp) == 0 ? null : round4((double) fn / (fn + tp)));
         m.put("answerablePrecision", (tp + fp) == 0 ? null : round4((double) tp / (tp + fp)));
         m.put("answerableRecall", (tp + fn) == 0 ? null : round4((double) tp / (tp + fn)));
         m.put("refusalPrecision", (tn + fn) == 0 ? null : round4((double) tn / (tn + fn)));
         m.put("refusalRecall", (tn + fp) == 0 ? null : round4((double) tn / (tn + fp)));
-        m.put("judgeInvocationRate", executed == 0 ? null : round4((double) judgeInvoked / executed));
+        m.put("judgeInvocationRate", executedCount == 0 ? null : round4((double) judgeInvoked / executedCount));
         m.put("judgeDegradedRate", judgeInvoked == 0 ? null : round4((double) judgeDegraded / judgeInvoked));
         m.put("judgeLatencyMsAvg", judgeInvoked == 0 ? null : round4((double) judgeLatencySum / judgeInvoked));
         m.put("degraded", Map.copyOf(degradedByType));

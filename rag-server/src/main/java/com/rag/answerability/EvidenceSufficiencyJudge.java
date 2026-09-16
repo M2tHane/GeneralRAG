@@ -100,14 +100,23 @@ public class EvidenceSufficiencyJudge {
 
             这些证据是否足以完整、明确地回答上述当前问题？""";
 
-    /** Judge 失败的统一异常（message 前缀为原因分类；调用方决定降级语义）。 */
+    /** Judge 失败的统一异常（携带结构化原因分类；message 前缀为人类可读形式）。 */
     public static final class JudgeUnavailableException extends RuntimeException {
-        public JudgeUnavailableException(String message, Throwable cause) {
+        private final JudgeFailureType failureType;
+
+        public JudgeUnavailableException(JudgeFailureType failureType, String message, Throwable cause) {
             super(message, cause);
+            this.failureType = failureType;
         }
 
-        public JudgeUnavailableException(String message) {
+        public JudgeUnavailableException(JudgeFailureType failureType, String message) {
             super(message);
+            this.failureType = failureType;
+        }
+
+        /** 结构化失败类型（R4.1.1）：指标统计的事实源，不依赖 message 前缀。 */
+        public JudgeFailureType failureType() {
+            return failureType;
         }
     }
 
@@ -167,12 +176,13 @@ public class EvidenceSufficiencyJudge {
             acquired = bulkhead.tryAcquire(cfg.getBulkheadWaitMs(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new JudgeUnavailableException("OVERLOADED: Judge 并发闸门等待被中断", e);
+            throw new JudgeUnavailableException(JudgeFailureType.OVERLOADED,
+                    "OVERLOADED: Judge 并发闸门等待被中断", e);
         }
         if (!acquired) {
             log.debug("Judge 容量耗尽 maxConcurrentJudges={} waitMs={}",
                     cfg.getMaxConcurrentJudges(), cfg.getBulkheadWaitMs());
-            throw new JudgeUnavailableException(
+            throw new JudgeUnavailableException(JudgeFailureType.OVERLOADED,
                     "OVERLOADED: Judge 并发已达上限（" + cfg.getMaxConcurrentJudges()
                             + "），等待 " + cfg.getBulkheadWaitMs() + "ms 未获得名额");
         }
@@ -189,17 +199,17 @@ public class EvidenceSufficiencyJudge {
             // langchain4j 抛出的 HttpTimeoutException 在上层被包装为模型异常；
             // 按异常链里的超时类型归类为 TIMEOUT（其余保持 MODEL_ERROR）
             if (isTimeout(e)) {
-                throw new JudgeUnavailableException(
+                throw new JudgeUnavailableException(JudgeFailureType.TIMEOUT,
                         "TIMEOUT: Judge " + cfg.getJudgeTimeoutSeconds() + " 秒超时", e);
             }
-            throw new JudgeUnavailableException(
+            throw new JudgeUnavailableException(JudgeFailureType.MODEL_ERROR,
                     "MODEL_ERROR: Judge 模型调用失败：" + e.getMessage(), e);
         } catch (RuntimeException e) {
             if (isTimeout(e)) {
-                throw new JudgeUnavailableException(
+                throw new JudgeUnavailableException(JudgeFailureType.TIMEOUT,
                         "TIMEOUT: Judge " + cfg.getJudgeTimeoutSeconds() + " 秒超时", e);
             }
-            throw new JudgeUnavailableException(
+            throw new JudgeUnavailableException(JudgeFailureType.MODEL_ERROR,
                     "MODEL_ERROR: Judge 模型调用失败：" + e.getMessage(), e);
         } finally {
             // 无论成功/失败/中断都必须释放许可，否则一次调用泄漏就永久缩减容量
@@ -247,7 +257,7 @@ public class EvidenceSufficiencyJudge {
      */
     JudgeResult parse(String raw) {
         if (raw == null || raw.isBlank()) {
-            throw new JudgeUnavailableException("INVALID_RESPONSE: Judge 返回空内容");
+            throw new JudgeUnavailableException(JudgeFailureType.INVALID_RESPONSE, "INVALID_RESPONSE: Judge 返回空内容");
         }
         String text = raw.strip();
         // 剥离 ```json ... ``` / ``` ... ``` 围栏
@@ -258,18 +268,19 @@ public class EvidenceSufficiencyJudge {
         int braceStart = text.indexOf('{');
         int braceEnd = text.lastIndexOf('}');
         if (braceStart < 0 || braceEnd <= braceStart) {
-            throw new JudgeUnavailableException("INVALID_RESPONSE: Judge 返回不含 JSON 对象：" + preview(text));
+            throw new JudgeUnavailableException(JudgeFailureType.INVALID_RESPONSE,
+                    "INVALID_RESPONSE: Judge 返回不含 JSON 对象：" + preview(text));
         }
         try {
             JsonNode node = objectMapper.readTree(text.substring(braceStart, braceEnd + 1));
             JsonNode answerable = node.path("answerable");
             JsonNode confidence = node.path("confidence");
             if (!answerable.isBoolean()) {
-                throw new JudgeUnavailableException(
+                throw new JudgeUnavailableException(JudgeFailureType.INVALID_RESPONSE,
                         "INVALID_RESPONSE: Judge 输出缺少合法 answerable 字段：" + preview(text));
             }
             if (!confidence.isNumber() || confidence.asDouble() < 0.0 || confidence.asDouble() > 1.0) {
-                throw new JudgeUnavailableException(
+                throw new JudgeUnavailableException(JudgeFailureType.INVALID_RESPONSE,
                         "INVALID_RESPONSE: Judge 输出缺少合法 confidence 字段：" + preview(text));
             }
             String reason = node.path("reason").isTextual()
@@ -278,7 +289,8 @@ public class EvidenceSufficiencyJudge {
         } catch (JudgeUnavailableException e) {
             throw e;
         } catch (Exception e) {
-            throw new JudgeUnavailableException("INVALID_RESPONSE: Judge 输出 JSON 解析失败：" + e.getMessage(), e);
+            throw new JudgeUnavailableException(JudgeFailureType.INVALID_RESPONSE,
+                    "INVALID_RESPONSE: Judge 输出 JSON 解析失败：" + e.getMessage(), e);
         }
     }
 

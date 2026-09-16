@@ -100,7 +100,8 @@ public class DebugRetrievalService {
     private static DebugResult.AnswerabilityDecisionPayload toDebugDecision(AnswerabilityDecision d) {
         return new DebugResult.AnswerabilityDecisionPayload(
                 d.answerable(), d.decisionType().name(), d.confidence(), d.reason(),
-                d.judgeInvoked(), d.degraded(), d.latencyMs());
+                d.judgeInvoked(), d.degraded(),
+                d.failureType() == null ? null : d.failureType().name(), d.latencyMs());
     }
 
     /** 兼容旧签名（第一轮调用点/测试）：默认模式。 */

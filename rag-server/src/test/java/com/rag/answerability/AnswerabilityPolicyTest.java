@@ -8,6 +8,7 @@ import com.rag.retrieval.model.Context;
 import com.rag.retrieval.model.RetrievalHit;
 import com.rag.retrieval.model.RetrievalMode;
 import com.rag.storage.es.EsHit;
+import com.rag.answerability.JudgeFailureType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -170,27 +171,31 @@ class AnswerabilityPolicyTest {
     @Test
     void judgeFailureFailOpenFallsBackToOldPolicy() {
         // failClosed=false（默认）：灰区（0.75 ≥ 0.65）退回旧阈值行为 = 放行；
-        // 降级 reason 保留原因分类前缀（如 TIMEOUT:）供归因
+        // 降级 reason 保留原因分类前缀（如 TIMEOUT:）供归因；failureType 结构化透出
         when(judge.judge(anyString(), anyList(), anyString()))
-                .thenThrow(new EvidenceSufficiencyJudge.JudgeUnavailableException("TIMEOUT: Judge 15 秒超时"));
+                .thenThrow(new EvidenceSufficiencyJudge.JudgeUnavailableException(
+                        JudgeFailureType.TIMEOUT, "TIMEOUT: Judge 15 秒超时"));
         AnswerabilityDecision d = policy().evaluate(input(0.75, RetrievalMode.HYBRID_RERANK, true));
         assertThat(d.answerable()).isTrue();
         assertThat(d.decisionType()).isEqualTo(AnswerabilityDecisionType.JUDGE_DEGRADED);
         assertThat(d.degraded()).isTrue();
         assertThat(d.confidence()).isNull();
         assertThat(d.reason()).contains("退回旧阈值行为").contains("TIMEOUT");
+        assertThat(d.failureType()).isEqualTo(JudgeFailureType.TIMEOUT);
     }
 
     @Test
     void judgeFailureFailClosedRefuses() {
         props.getRetrieval().getAnswerability().setFailClosed(true);
         when(judge.judge(anyString(), anyList(), anyString()))
-                .thenThrow(new EvidenceSufficiencyJudge.JudgeUnavailableException("MODEL_ERROR: 服务不可用"));
+                .thenThrow(new EvidenceSufficiencyJudge.JudgeUnavailableException(
+                        JudgeFailureType.MODEL_ERROR, "MODEL_ERROR: 服务不可用"));
         AnswerabilityDecision d = policy().evaluate(input(0.90, RetrievalMode.HYBRID_RERANK, true));
         assertThat(d.answerable()).isFalse();
         assertThat(d.decisionType()).isEqualTo(AnswerabilityDecisionType.JUDGE_DEGRADED);
         assertThat(d.degraded()).isTrue();
         assertThat(d.reason()).contains("failClosed");
+        assertThat(d.failureType()).isEqualTo(JudgeFailureType.MODEL_ERROR);
     }
 
     // ---------- 关闭（对照模式） ----------

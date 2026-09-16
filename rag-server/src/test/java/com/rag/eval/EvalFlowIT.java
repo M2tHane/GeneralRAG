@@ -24,8 +24,8 @@ import com.rag.storage.repository.EvalRunItemRepository;
 import com.rag.storage.repository.EvalRunRepository;
 import com.rag.storage.repository.KnowledgeBaseRepository;
 import com.rag.support.FakeOpenAiServer;
+import com.rag.support.SharedInfraSupport;
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -36,11 +36,6 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.containers.wait.strategy.HttpWaitStrategy;
-import org.testcontainers.elasticsearch.ElasticsearchContainer;
-import org.testcontainers.utility.DockerImageName;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -50,28 +45,15 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>不依赖 Task 4 控制器（T4 并行中）：直接用 repository 组装知识库与已入库文档
  * （与 QaStreamIT 相同的 ES 直写方式）；经 EvalService 导入 JSON 数据集 → runSync
  * 同步执行 → 断言 configSnapshot / hit / metrics / 人工标注。</p>
+ *
+ * <p>R4.1.1：MySQL/ES/MinIO 改用 {@link SharedInfraSupport} 共享容器（引用计数），
+ * 套件隔离靠随机 UUID 数据与独立 bucket 名；FakeOpenAiServer 保持套件私有。</p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         classes = {com.rag.RagApplication.class})
 @ActiveProfiles("test")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-class EvalFlowIT {
-
-    private static final MySQLContainer<?> MYSQL = new MySQLContainer<>(DockerImageName.parse("mysql:8"))
-            .withStartupTimeout(java.time.Duration.ofMinutes(5));
-    private static final GenericContainer<?> MINIO = new GenericContainer<>(
-            DockerImageName.parse("minio/minio:latest"))
-            .withCommand("server", "/data")
-            .withExposedPorts(9000)
-            .waitingFor(new HttpWaitStrategy().forPort(9000).forPath("/minio/health/ready")
-                    .forStatusCode(200))
-            .withStartupTimeout(java.time.Duration.ofMinutes(5));
-    private static final ElasticsearchContainer ES = new ElasticsearchContainer(
-            DockerImageName.parse("docker.elastic.co/elasticsearch/elasticsearch:8.14.1"))
-            .withEnv("xpack.security.enabled", "false")
-            .withEnv("xpack.security.http.ssl.enabled", "false")
-            .withEnv("ES_JAVA_OPTS", "-Xms512m -Xmx512m")
-            .withStartupTimeout(java.time.Duration.ofMinutes(6));
+class EvalFlowIT extends SharedInfraSupport {
 
     private static FakeOpenAiServer fakeModel;
 
@@ -86,22 +68,15 @@ class EvalFlowIT {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry registry) {
-        try {
-            fakeModel = new FakeOpenAiServer();
-            fakeModel.start();
-        } catch (Exception e) {
-            throw new IllegalStateException("FakeOpenAiServer 启动失败", e);
-        }
-        MYSQL.start();
-        MINIO.start();
-        ES.start();
-        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
-        registry.add("spring.datasource.username", MYSQL::getUsername);
-        registry.add("spring.datasource.password", MYSQL::getPassword);
+        fakeModel = newFakeModel();
+        acquire();
+        registry.add("spring.datasource.url", mysql()::getJdbcUrl);
+        registry.add("spring.datasource.username", mysql()::getUsername);
+        registry.add("spring.datasource.password", mysql()::getPassword);
         registry.add("spring.elasticsearch.uris",
-                () -> "http://" + ES.getHost() + ":" + ES.getMappedPort(9200));
+                () -> "http://" + es().getHost() + ":" + es().getMappedPort(9200));
         registry.add("minio.endpoint",
-                () -> "http://" + MINIO.getHost() + ":" + MINIO.getMappedPort(9000));
+                () -> "http://" + minio().getHost() + ":" + minio().getMappedPort(9000));
         registry.add("minio.access-key", () -> "minioadmin");
         registry.add("minio.secret-key", () -> "minioadmin");
         registry.add("minio.bucket", () -> "eval-it");
@@ -115,6 +90,7 @@ class EvalFlowIT {
         if (fakeModel != null) {
             fakeModel.stop();
         }
+        release();
     }
 
     // ------------------------------------------------------------------
@@ -340,10 +316,12 @@ class EvalFlowIT {
         assertThat(confusion).containsEntry("tp", 0).containsEntry("fp", 0)
                 .containsEntry("fn", 0).containsEntry("tn", 0);
         assertThat(((Number) confusion.get("judgeDegradedRate")).doubleValue()).isEqualTo(1.0);
-        // 降级明细按 decisionType 透出（2 题 → JUDGE_DEGRADED ×2）
+        // 降级明细按结构化 failureType 透出（2 题均 MODEL_ERROR → 500 故障）
         @SuppressWarnings("unchecked")
         Map<String, Object> degraded = (Map<String, Object>) confusion.get("degraded");
-        assertThat(degraded).containsEntry("JUDGE_DEGRADED", 2);
+        assertThat(degraded).containsEntry("MODEL_ERROR", 2);
+        // R4.1.1：executedCount（含 degraded）/ evaluatedCount（排除 degraded）分离
+        assertThat(confusion).containsEntry("executedCount", 2).containsEntry("evaluatedCount", 0);
 
         // refusalAccuracy 分母同样排除 degraded 题（0 题参与 → null）
         assertThat(metrics.get("refusalAccuracy")).isNull();
@@ -355,6 +333,74 @@ class EvalFlowIT {
                 assertThat(i.get("answerabilityDecisionType")).isEqualTo("JUDGE_DEGRADED"));
 
         fakeModel.setNonStreamFailure(false);
+    }
+
+    /**
+     * R4.1.1 调用链测试：FOLLOW_UP 数据集 history 必须贯穿
+     * Eval → answerOnce → AnswerabilityInput → AnswerabilityPolicy →
+     * EvidenceSufficiencyJudge。R4.1 曾在 answerOnce 用无 history 的便捷构造，
+     * 导致 history 只到生成端、Judge 永远看不到（本用例对该回归点敏感）。
+     *
+     * <p>样本设计：当前问题「那这个触发以后怎么解除？」离开历史无法理解（"这个"
+     * 指代第一轮对话里的洪泛水位）；证据单独提供 ES 只读块解除内容。断言：
+     * ① Judge prompt 含历史区（用户+助手轮）与"仅用于理解指代"声明；
+     * ② Judge prompt 的【候选证据】区不含历史内容（history 不是证据）；
+     * ③ 判定走 JUDGE 路径且决策/回答正常。</p>
+     */
+    @Test
+    @Order(7)
+    void followUpHistoryReachesJudgeThroughEvalChain() {
+        String historyJson = """
+                [
+                  {"question":"那这个触发以后怎么解除？","referenceAnswer":"调整水位后等待自动解除，或手动放开只读块",
+                   "answerable":true,"category":"FOLLOW_UP",
+                   "history":[
+                     {"role":"user","content":"ES 洪泛水位是什么？"},
+                     {"role":"assistant","content":"洪泛水位是磁盘使用率达到 90%% 时把索引标记为只读的机制。"}
+                   ],
+                   "evidence":[{"docName":"%s","titlePath":"%s"}]}
+                ]
+                """.formatted(DOC_NAME, DOC_TITLE_PATH).replace("%%", "%");
+        EvalService.EvalDatasetView ds = evalService.importDataset(
+                multipartFile(historyJson, "followup链路集.json"), "eval-it-followup链路", DatasetType.TUNING);
+
+        fakeModel.resetNonStreamCounters();
+        // Judge 判可回答（合法 JSON）+ 生成正常回答
+        fakeModel.setNonStreamAnswer("{\"answerable\": true, \"confidence\": 0.88, \"reason\": \"证据含解除只读块的方法\"}");
+        fakeModel.setNonStreamFailure(false);
+        fakeModel.setChatAnswer("依据文档，调整水位设置后等待自动解除或手动放开只读块。");
+
+        EvalRunEntity run = evalService.createRun(UUID.fromString(ds.id()),
+                UUID.fromString(ds.latestVersion().versionId()),
+                UUID.fromString(kbId), null, null);
+        evalService.runSync(UUID.fromString(run.getId()));
+        EvalRunEntity finished = evalService.getRun(UUID.fromString(run.getId()));
+        assertThat(finished.getStatus()).isEqualTo(EvalRunStatus.COMPLETED);
+
+        // 1) Judge 真实被调用且 prompt 同时含历史区与证据区
+        assertThat(fakeModel.nonStreamRequestCount()).isEqualTo(1);
+        List<String> prompts = fakeModel.lastChatPrompts();
+        String judgePrompt = prompts.stream()
+                .filter(p -> p.contains("【对话历史】")).findFirst().orElse(null);
+        assertThat(judgePrompt)
+                .as("history 应贯穿 Eval→answerOnce→AnswerabilityInput→Judge（R4.1.1 修复点）")
+                .isNotNull();
+        assertThat(judgePrompt).contains("ES 洪泛水位是什么？")
+                .contains("洪泛水位是磁盘使用率达到 90% 时把索引标记为只读的机制")
+                .contains("仅用于理解当前问题中的指代")
+                .contains("那这个触发以后怎么解除？");
+
+        // 2) 历史内容不得混入证据区：【候选证据】与【对话历史】之间不含历史助手指代内容
+        String evidenceZone = judgePrompt.substring(judgePrompt.indexOf("【候选证据】"),
+                judgePrompt.indexOf("【当前问题】"));
+        assertThat(evidenceZone).doesNotContain("洪泛水位是磁盘使用率达到 90%");
+
+        // 3) 判定落库可复盘：走 JUDGE 路径（非门控直拒）
+        EvalRunViewService.ItemPage items = runViewService.listItems(finished, 1, 10);
+        Map<String, Object> item = items.items().get(0);
+        assertThat(String.valueOf(item.get("answerabilityDecisionType")))
+                .isIn("JUDGE_ACCEPT", "JUDGE_REFUSE");
+        assertThat(item.get("refused")).isEqualTo(Boolean.FALSE);
     }
 
     private static MockMultipartFile multipartFile(String content, String fileName) {
