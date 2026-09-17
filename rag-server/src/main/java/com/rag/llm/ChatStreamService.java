@@ -222,8 +222,9 @@ public class ChatStreamService {
                                    Integer topKOverride, Double minScoreOverride,
                                    List<PromptAssembler.HistoryTurn> history) {
         long start = System.currentTimeMillis();
-        RetrievalPipeline.RetrievalOutcome outcome = retrievalPipeline.execute(
-                RetrievalRequest.of(kbId, question, topKOverride, minScoreOverride));
+        // R6-C：pipeline 内部按 history 触发 rewrite（仅检索查询）；Judge/Generation 仍用原 question
+        RetrievalPipeline.RetrievalOutcome outcome = retrieveWithRewrite(
+                kbId, question, history, topKOverride, minScoreOverride);
         List<RetrievalHit> hits = outcome.hits();
         long retrievalMs = System.currentTimeMillis() - start;
         List<RetrievalHit> passed = hits.stream().filter(RetrievalHit::passedThreshold).toList();
@@ -245,7 +246,8 @@ public class ChatStreamService {
             return new AnswerResult(refusalPolicy.refusalAnswer(), List.of(), hits,
                     System.currentTimeMillis() - start, retrievalMs,
                     System.currentTimeMillis() - start - retrievalMs - answerabilityMs, true,
-                    decision, answerabilityMs, trace);
+                    decision, answerabilityMs, trace,
+                    queryInfoOf(question, outcome));
         }
 
         List<ChatMessage> messages = promptAssembler.build(question, history, context);
@@ -287,7 +289,8 @@ public class ChatStreamService {
         long totalMs = System.currentTimeMillis() - start;
         return new AnswerResult(full.toString(), buildCitations(passed), hits, totalMs,
                 retrievalMs, totalMs - retrievalMs - answerabilityMs, false,
-                decision, answerabilityMs, trace);
+                decision, answerabilityMs, trace,
+                queryInfoOf(question, outcome));
     }
 
     /** 非流式回答聚合结果（eval 复用）。 */
@@ -295,17 +298,36 @@ public class ChatStreamService {
                                List<RetrievalHit> hits, long elapsedMs,
                                long retrievalMs, long generationMs, boolean refusal,
                                com.rag.answerability.AnswerabilityDecision answerability,
-                               long answerabilityMs, com.rag.retrieval.RetrievalTrace trace) {
+                               long answerabilityMs, com.rag.retrieval.RetrievalTrace trace,
+                               AnswerQueryInfo queryInfo) {
 
-        /** 兼容旧构造（trace = null）。 */
+        /** 兼容旧构造（trace = null、无 rewrite 信息）。 */
         public AnswerResult(String answer, List<Map<String, Object>> citations,
                             List<RetrievalHit> hits, long elapsedMs,
                             long retrievalMs, long generationMs, boolean refusal,
                             com.rag.answerability.AnswerabilityDecision answerability,
                             long answerabilityMs) {
             this(answer, citations, hits, elapsedMs, retrievalMs, generationMs,
-                    refusal, answerability, answerabilityMs, null);
+                    refusal, answerability, answerabilityMs, null, null);
         }
+
+        /** 兼容旧构造（无 rewrite 信息）。 */
+        public AnswerResult(String answer, List<Map<String, Object>> citations,
+                            List<RetrievalHit> hits, long elapsedMs,
+                            long retrievalMs, long generationMs, boolean refusal,
+                            com.rag.answerability.AnswerabilityDecision answerability,
+                            long answerabilityMs, com.rag.retrieval.RetrievalTrace trace) {
+            this(answer, citations, hits, elapsedMs, retrievalMs, generationMs,
+                    refusal, answerability, answerabilityMs, trace, null);
+        }
+    }
+
+    /**
+     * R6-C：本次问答实际使用的检索查询信息（original=用户问题；retrievalQuery=
+     * rewrite 后送入 pipeline 的查询；rewritten=false 表示未改写/回退）。
+     * 只含这三个轻量字段，不携带 history（不泄漏对话内容到 trace）。
+     */
+    public record AnswerQueryInfo(String originalQuery, String retrievalQuery, boolean queryRewritten) {
     }
 
     /** 问答流命令（controller 请求体映射；约束对齐契约 QAStreamRequest）。 */
@@ -367,8 +389,9 @@ public class ChatStreamService {
             send(state, "stage", new StageEvent("RETRIEVAL_STARTED", null, null));
 
             long retrievalStart = System.currentTimeMillis();
-            RetrievalPipeline.RetrievalOutcome outcome = retrievalPipeline.execute(
-                    RetrievalRequest.of(state.kbId, state.question));
+            // R6-C：pipeline 内部按 history 触发 rewrite（仅检索查询）；Judge/Generation 仍用 state.question
+            RetrievalPipeline.RetrievalOutcome outcome = retrieveWithRewrite(
+                    state.kbId, state.question, state.history, null, null);
             List<RetrievalHit> hits = outcome.hits();
             List<RetrievalHit> passed = hits.stream().filter(RetrievalHit::passedThreshold).toList();
             // R4/R4.1：证据充分性判定（低分直拒 → 其余 Judge，共享 AnswerabilityPolicy）。
@@ -384,6 +407,8 @@ public class ChatStreamService {
             state.refusal = insufficient;
             state.citations = insufficient ? List.of() : buildCitations(passed);
             state.answerability = decision;
+            // R6-C：rewrite 信息留给 debug 落库可查（不进 SSE 用户事件——自由文本不进用户侧）
+            state.queryInfo = queryInfoOf(state.question, outcome);
             long elapsedMs = System.currentTimeMillis() - retrievalStart;
             double topScore = hits.stream().mapToDouble(RetrievalHit::score).max().orElse(0.0);
             // stage 行如实反映检索真相与判定原因：按 decisionType 给出说明，不把 Judge 拒答谎报成低分
@@ -682,6 +707,33 @@ public class ChatStreamService {
     // 校验 / 持久化 / 组装
     // ==================================================================
 
+    /**
+     * R6-C：统一检索入口（流式与非流式唯一路径）。
+     *
+     * <p>rewrite 触发点<b>唯一收敛在 {@link RetrievalPipeline}</b>：本方法只负责
+     * 把 history 传入请求，pipeline 在检索前执行 history-aware query rewrite
+     * （仅改检索查询），并把 rewrite 三元组写进 trace。Judge/Generation 看到的
+     * 用户问题仍是原始 question + history。rewrite 失败由 Rewriter 内部回退
+     * originalQuery，不会抛出到此。</p>
+     */
+    private RetrievalPipeline.RetrievalOutcome retrieveWithRewrite(String kbId, String question,
+                                                                  List<PromptAssembler.HistoryTurn> history,
+                                                                  Integer topKOverride, Double minScoreOverride) {
+        return retrievalPipeline.execute(
+                new RetrievalRequest(kbId, question,
+                        topKOverride, minScoreOverride, null, null, history));
+    }
+
+    /** 从 trace 提取 rewrite 三元组（未触发时 retrievalQuery=原问题、rewritten=false）。 */
+    private static AnswerQueryInfo queryInfoOf(String question, RetrievalPipeline.RetrievalOutcome outcome) {
+        com.rag.retrieval.RetrievalTrace.QueryRewriteInfo info =
+                outcome.trace() == null ? null : outcome.trace().queryRewrite();
+        if (info == null) {
+            return new AnswerQueryInfo(question, question, false);
+        }
+        return new AnswerQueryInfo(info.originalQuery(), info.retrievalQuery(), info.rewritten());
+    }
+
     private void validateKbAndSession(String kbId, String sessionId) {
         if (!kbRepository.existsById(kbId)) {
             throw new DomainException(ErrorCode.KB_NOT_FOUND);
@@ -806,6 +858,8 @@ public class ChatStreamService {
         volatile boolean refusal;
         /** R4：本次 Answerability 判定（含决策类型/置信度/原因，落库到消息与调试可查）。 */
         volatile com.rag.answerability.AnswerabilityDecision answerability;
+        /** R6-C：本次实际使用的检索查询信息（original/retrievalQuery/rewritten）。 */
+        volatile AnswerQueryInfo queryInfo;
         volatile String userMessageId;
         volatile Future<?> heartbeat;
         volatile Future<?> watchdog;

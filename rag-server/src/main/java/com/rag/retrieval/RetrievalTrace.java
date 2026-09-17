@@ -26,6 +26,9 @@ import java.util.stream.Collectors;
  * @param rerankedCandidates 重排后候选（rank = 重排序；未重排/降级为空）
  * @param finalTopK          最终返回的 topK chunkId（有序）
  * @param timing             各阶段耗时（毫秒）
+ * @param queryRewrite       R6-C：本次检索的查询改写信息（未启用 rewrite 时为 null）——
+ *                           originalQuery=用户原始问题、retrievalQuery=实际检索查询、
+ *                           rewritten=是否发生改写。不携带 history 内容。
  */
 public record RetrievalTrace(
         List<StageCandidate> vectorCandidates,
@@ -35,7 +38,35 @@ public record RetrievalTrace(
         List<StageCandidate> preRerankCandidates,
         List<StageCandidate> rerankedCandidates,
         List<String> finalTopK,
-        StageTiming timing) {
+        StageTiming timing,
+        QueryRewriteInfo queryRewrite) {
+
+    /**
+     * R6-C：查询改写信息（轻量字段；与 ChatStreamService.AnswerQueryInfo 同语义，
+     * 独立定义避免 retrieval 包反向依赖 llm 包）。
+     *
+     * @param originalQuery  用户原始问题
+     * @param retrievalQuery 实际检索查询
+     * @param rewritten      是否改写生效
+     * @param latencyMs      rewrite 耗时（毫秒；未触发 rewrite 为 0）
+     * @param fallback       rewrite 是否失败回退（超时/模型异常/响应非法）
+     */
+    public record QueryRewriteInfo(String originalQuery, String retrievalQuery, boolean rewritten,
+                                   long latencyMs, boolean fallback) {
+    }
+
+    /** 兼容旧构造（无 rewrite 信息；测试直构用）。 */
+    public RetrievalTrace(List<StageCandidate> vectorCandidates,
+                          List<StageCandidate> bm25Candidates,
+                          List<StageCandidate> unionCandidates,
+                          List<StageCandidate> fusedCandidates,
+                          List<StageCandidate> preRerankCandidates,
+                          List<StageCandidate> rerankedCandidates,
+                          List<String> finalTopK,
+                          StageTiming timing) {
+        this(vectorCandidates, bm25Candidates, unionCandidates, fusedCandidates,
+                preRerankCandidates, rerankedCandidates, finalTopK, timing, null);
+    }
 
     /**
      * 阶段候选：chunkId + 该阶段名次（1 起）+ 该阶段分数 + 证据锚点
@@ -65,7 +96,7 @@ public record RetrievalTrace(
     /** 空轨迹（构建失败前的占位）。 */
     public static RetrievalTrace empty(StageTiming timing) {
         return new RetrievalTrace(List.of(), List.of(), List.of(), List.of(), List.of(),
-                List.of(), List.of(), timing);
+                List.of(), List.of(), timing, null);
     }
 
     /** 指定 chunk 在某阶段的名次（未出现返回 null——"该阶段未召回"是有效信息）。 */

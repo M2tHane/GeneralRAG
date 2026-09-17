@@ -1200,6 +1200,20 @@ components:
           nullable: true
           enum: [VECTOR, HYBRID, HYBRID_RERANK]
           description: 检索模式覆盖（R2-D1）；缺省取服务端配置。用于对比「仅向量 / 融合 / 融合+重排」的排序差异
+        history:
+          type: array
+          nullable: true
+          description: |
+            R6-C：会话历史（时间正序，[{role: user|assistant, content}]）。非空时经由
+            统一检索流水线触发 history-aware query rewrite——仅改变检索查询，
+            Answerability 判定与上下文仍基于原始 question。响应 queryRewrite 字段
+            透出改写结果；本字段内容不会回显到响应中。
+          items:
+            type: object
+            required: [role, content]
+            properties:
+              role: { type: string, enum: [user, assistant] }
+              content: { type: string }
     RetrievalMode:
       type: string
       enum: [VECTOR, HYBRID, HYBRID_RERANK]
@@ -1351,6 +1365,17 @@ components:
         issues:
           type: array
           items: { $ref: "#/components/schemas/DebugIssue" }
+        queryRewrite:
+          type: object
+          nullable: true
+          description: |
+            R6-C：本次检索的查询改写信息（history 非空且 rewrite 启用时非 null；
+            未启用/未触发为 null——不虚构改写）。
+          required: [originalQuery, retrievalQuery, queryRewritten]
+          properties:
+            originalQuery: { type: string, description: 用户原始问题 }
+            retrievalQuery: { type: string, description: 实际送入检索流水线的查询 }
+            queryRewritten: { type: boolean, description: 是否发生改写（false=保持原问题或失败回退） }
 
     # ---------- 评测 ----------
     DatasetType:
@@ -1665,6 +1690,17 @@ components:
         answerabilityReason: { type: string, nullable: true, description: R4 决策原因简述（截断 500 字符） }
         answerabilityDegraded: { type: boolean, nullable: true, description: R4 Judge 是否失败降级 }
         answerabilityLatencyMs: { type: integer, nullable: true, description: R4 判定耗时（毫秒） }
+        retrievalQuery:
+          type: string
+          nullable: true
+          description: |
+            R6-C：本次实际使用的检索查询（history-aware rewrite 后；未改写时等于
+            question 本身）。旧数据/未执行为 NULL。Judge/Generation 仍使用原始
+            question，本字段只反映检索层输入。
+        queryRewritten:
+          type: boolean
+          nullable: true
+          description: R6-C：检索查询是否发生 history-aware 改写；旧数据/未执行为 NULL
         reviewTag:
           type: string
           nullable: true

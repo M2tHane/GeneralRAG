@@ -120,6 +120,16 @@ rag:
       # 获取 Judge 名额的最长等待（毫秒）；耗尽仍未获得名额 → JUDGE_DEGRADED(OVERLOADED)
       bulkhead-wait-ms: ${RAG_ANSWERABILITY_BULKHEAD_WAIT_MS:500}
       # R4.1：judge-timeout-seconds 同时作为 Judge HTTP connect/read timeout（单一超时语义）
+    query-rewrite:
+      # R6-C：history-aware query rewrite（检索前把依赖历史的当前问题改写为独立查询；
+      # 仅影响检索查询，Judge/Generation 仍用原始问题；失败回退原始查询）
+      enabled: ${RAG_QUERY_REWRITE_ENABLED:true}
+      # rewrite 模型 HTTP connect/read timeout（秒，单一超时语义；独立于生成与 Judge 超时）
+      timeout-seconds: ${RAG_QUERY_REWRITE_TIMEOUT_SECONDS:5}
+      # 改写查询最大长度（字符）；超长视为非法输出并回退原始查询
+      max-query-length: 200
+      # rewrite 提示词携带的最大历史轮数（沿用项目 history window 的收敛约定）
+      max-history-turns: 4
   ingestion:
     worker-threads: 2
     max-upload-size-mb: 50

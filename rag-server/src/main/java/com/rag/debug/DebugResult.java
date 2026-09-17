@@ -88,7 +88,19 @@ public final class DebugResult {
     public record DebugRetrievalResult(EffectiveConfig effectiveConfig, List<HitPayload> hits,
                                        Timings timings, ContextPayload context,
                                        AnswerabilityDecisionPayload answerability,
-                                       List<Issue> issues, RetrievalTracePayload trace) {
+                                       List<Issue> issues, RetrievalTracePayload trace,
+                                       QueryRewritePayload queryRewrite) {
+    }
+
+    /**
+     * R6-C：本次检索的查询改写信息（history 非空且 rewrite 启用时非 null）。
+     *
+     * @param originalQuery  用户原始问题
+     * @param retrievalQuery 实际送入检索流水线的查询
+     * @param queryRewritten 是否发生改写（false = 保持原问题或失败回退）
+     */
+    public record QueryRewritePayload(String originalQuery, String retrievalQuery,
+                                      boolean queryRewritten) {
     }
 
     /**

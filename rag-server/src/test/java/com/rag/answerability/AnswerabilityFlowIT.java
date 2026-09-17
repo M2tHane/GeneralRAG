@@ -97,6 +97,10 @@ class AnswerabilityFlowIT {
         // Judge 超时压短：timeout 场景不必等 15s
         registry.add("rag.retrieval.answerability.judge-timeout-seconds", () -> "2");
         registry.add("rag.retrieval.answerability.max-concurrent-judges", () -> "4");
+        // R6-C：本套件断言 Judge 精确计数（nonStreamRequestCount==1/0）。
+        // 多 case 复用同一会话导致 history 非空，会额外触发 query rewrite 请求；
+        // rewrite 行为由 QueryRewriteFlowIT 专门覆盖，此处关闭以保持判定语义断言纯净
+        registry.add("rag.retrieval.query-rewrite.enabled", () -> "false");
     }
 
     @AfterAll

@@ -7,6 +7,7 @@ import com.rag.answerability.AnswerabilityDecision;
 import com.rag.answerability.AnswerabilityInput;
 import com.rag.answerability.AnswerabilityPolicy;
 import com.rag.config.RagProperties;
+import com.rag.llm.PromptAssembler;
 import com.rag.retrieval.ContextAssembler;
 import com.rag.retrieval.RetrievalPipeline;
 import com.rag.retrieval.RetrievalRequest;
@@ -54,14 +55,20 @@ public class DebugRetrievalService {
     /**
      * 调试检索：复用统一流水线，输出分段耗时 + 分阶段位次 + 上下文 + Answerability 判定。
      *
+     * <p>R6-C：{@code history} 非空时经由统一流水线触发 history-aware query rewrite，
+     * 响应透出 originalQuery / retrievalQuery / queryRewritten（不回显 history 内容）。
+     * Answerability 判定输入的用户问题仍是原始 question（rewritten query 不是用户实际
+     * 提出的问题，只用于检索）。</p>
+     *
      * @param modeOverride 检索模式覆盖（null = 取配置）
      */
     public DebugResult.DebugRetrievalResult debug(String kbId, String question,
                                                   Integer topKOverride, Double minScoreOverride,
-                                                  RetrievalMode modeOverride) {
+                                                  RetrievalMode modeOverride,
+                                                  List<PromptAssembler.HistoryTurn> history) {
         RetrievalPipeline.RetrievalOutcome outcome = retrievalService.retrieveOutcome(
                 new RetrievalRequest(kbId, question, topKOverride, minScoreOverride,
-                        modeOverride, null));
+                        modeOverride, null, history));
         List<RetrievalHit> ranked = outcome.hits();
         RetrievalPipeline.RetrievalDiagnostics diag = outcome.diagnostics();
 
@@ -79,6 +86,13 @@ public class DebugRetrievalService {
         String judgeModel = answerabilityEnabled
                 ? ragProperties.getModels().getChat().getModelName() : "";
 
+        // R6-C：rewrite 三元组（trace 未产出/未启用时为 null——不虚构改写）
+        com.rag.retrieval.RetrievalTrace.QueryRewriteInfo rewrite = outcome.trace() == null
+                ? null : outcome.trace().queryRewrite();
+        DebugResult.QueryRewritePayload rewritePayload = rewrite == null ? null
+                : new DebugResult.QueryRewritePayload(rewrite.originalQuery(),
+                        rewrite.retrievalQuery(), rewrite.rewritten());
+
         return new DebugResult.DebugRetrievalResult(
                 new DebugResult.EffectiveConfig(diag.topK(), diag.minScore(),
                         ragProperties.getModels().getEmbedding().getModelName(),
@@ -94,7 +108,15 @@ public class DebugRetrievalService {
                         context.chunkIds()),
                 toDebugDecision(decision),
                 buildIssues(ranked, context, diag),
-                toTracePayload(outcome.trace()));
+                toTracePayload(outcome.trace()),
+                rewritePayload);
+    }
+
+    /** 兼容旧签名（第一轮调用点/测试）：默认模式、无 history。 */
+    public DebugResult.DebugRetrievalResult debug(String kbId, String question,
+                                                  Integer topKOverride, Double minScoreOverride,
+                                                  RetrievalMode modeOverride) {
+        return debug(kbId, question, topKOverride, minScoreOverride, modeOverride, null);
     }
 
     /** R5-B：RetrievalTrace → Debug 载荷（同一份 trace 结构，Eval/Debug 不两套）。 */

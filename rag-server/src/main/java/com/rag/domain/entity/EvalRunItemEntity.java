@@ -102,6 +102,14 @@ public class EvalRunItemEntity {
     @Column(name = "answerability_latency_ms")
     private Integer answerabilityLatencyMs;
 
+    /** R6-C：本次实际使用的检索查询（rewrite 后）；未执行/旧行为为 NULL。 */
+    @Column(name = "retrieval_query", length = 2000)
+    private String retrievalQuery;
+
+    /** R6-C：检索查询是否发生 history-aware 改写；未执行/旧行为为 NULL。 */
+    @Column(name = "query_rewritten")
+    private Boolean queryRewritten;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "review_tag", length = 20)
     private ReviewTag reviewTag;
@@ -258,6 +266,22 @@ public class EvalRunItemEntity {
 
     public void setAnswerabilityLatencyMs(Integer answerabilityLatencyMs) {
         this.answerabilityLatencyMs = answerabilityLatencyMs;
+    }
+
+    public String getRetrievalQuery() {
+        return retrievalQuery;
+    }
+
+    public void setRetrievalQuery(String retrievalQuery) {
+        this.retrievalQuery = retrievalQuery;
+    }
+
+    public Boolean getQueryRewritten() {
+        return queryRewritten;
+    }
+
+    public void setQueryRewritten(Boolean queryRewritten) {
+        this.queryRewritten = queryRewritten;
     }
 
     public ReviewTag getReviewTag() {

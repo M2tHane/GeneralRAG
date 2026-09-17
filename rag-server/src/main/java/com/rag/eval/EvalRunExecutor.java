@@ -222,6 +222,15 @@ public class EvalRunExecutor {
         // R6-A.1 §11：evidenceCoverageAvg 统一为 macro average（逐题 coverage 再平均），
         // 与全局口径一致；micro 口径（covered chunks / total chunks）改由 evidenceRecall 输出
         Map<String, double[]> evidenceModeStats = new java.util.LinkedHashMap<>();
+        // R6-C：Query Rewrite 可观测（invoked=history 非空的题；rewritten=改写生效；
+        // fallback=rewrite 失败回退；unchanged=rewriter 判定保持原问题）
+        int rewriteInvokedCount = 0;
+        int rewriteRewrittenCount = 0;
+        int rewriteFallbackCount = 0;
+        int rewriteUnchangedCount = 0;
+        long rewriteLatencySum = 0;
+        int rewriteLatencyCount = 0;
+        List<Integer> rewriteLatencies = new java.util.ArrayList<>();
         List<Integer> latencies = new java.util.ArrayList<>();
 
         for (EvalDatasetItemEntity item : datasetItems) {
@@ -446,6 +455,29 @@ public class EvalRunExecutor {
                 stageAgg.add(StageMetrics.evaluateItem(evidenceList, trace));
             }
 
+            // R6-C：rewrite 可观测——逐题检索查询快照落库（BadCase 归因：改写了什么、
+            // 是否回退），聚合计数进 metrics。latencyMs 取 Rewriter 真实耗时。
+            com.rag.retrieval.RetrievalTrace.QueryRewriteInfo rewriteInfo =
+                    trace == null ? null : trace.queryRewrite();
+            if (rewriteInfo != null) {
+                rewriteInvokedCount++;
+                runItem.setRetrievalQuery(rewriteInfo.retrievalQuery());
+                runItem.setQueryRewritten(rewriteInfo.rewritten());
+                if (rewriteInfo.rewritten()) {
+                    rewriteRewrittenCount++;
+                } else {
+                    rewriteUnchangedCount++;
+                }
+                if (rewriteInfo.fallback()) {
+                    rewriteFallbackCount++;
+                }
+                rewriteLatencySum += rewriteInfo.latencyMs();
+                if (rewriteInfo.latencyMs() > 0) {
+                    rewriteLatencyCount++;
+                    rewriteLatencies.add((int) Math.min(Integer.MAX_VALUE, rewriteInfo.latencyMs()));
+                }
+            }
+
             runItemRepository.save(runItem);
 
             // R4.1.2：延迟统计只收"成功执行的题"——executionFailed 的耗时（通常是一次
@@ -459,6 +491,7 @@ public class EvalRunExecutor {
         }
 
         latencies.sort(null);
+        rewriteLatencies.sort(null);
         Map<String, Object> metrics = new LinkedHashMap<>();
         for (int k = 0; k < HIT_KS.length; k++) {
             metrics.put("hitAt" + HIT_KS[k], answerableCount == 0 ? null
@@ -514,6 +547,20 @@ public class EvalRunExecutor {
         // itemCount：R4.1.2 前的历史字段，语义 = 成功执行数（= executedCount），保留兼容；
         // 新口径请使用 attemptedCount / executedCount / evaluatedCount
         metrics.put("itemCount", executedCount);
+        // R6-C：Query Rewrite 可观测指标。invoked = rewrite 实际触发（history 非空）的题；
+        // rewritten = 改写生效；unchanged = Rewriter 判定保持原问题；fallback = 失败回退。
+        // latencyAvg 取 Rewriter 真实耗时（不含检索本身）；样本过少时 p95 无统计意义，
+        // 输出 null（与整体 latencyP95 口径一致——最近秩法在样本 <1 时不产出）。
+        Map<String, Object> rewriteMetrics = new LinkedHashMap<>();
+        rewriteMetrics.put("invoked", rewriteInvokedCount);
+        rewriteMetrics.put("rewritten", rewriteRewrittenCount);
+        rewriteMetrics.put("unchanged", rewriteUnchangedCount);
+        rewriteMetrics.put("fallback", rewriteFallbackCount);
+        rewriteMetrics.put("latencyAvgMs", rewriteLatencyCount == 0 ? null
+                : round4((double) rewriteLatencySum / rewriteLatencyCount));
+        rewriteMetrics.put("latencyP95Ms", rewriteLatencies.isEmpty() ? null
+                : percentile(rewriteLatencies, 0.95));
+        metrics.put("queryRewrite", rewriteMetrics);
 
         run.setStatus(EvalRunStatus.COMPLETED);
         run.setMetrics(metrics);

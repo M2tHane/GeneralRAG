@@ -269,6 +269,10 @@ public class RagProperties {
         @NotNull
         private Answerability answerability = new Answerability();
 
+        @Valid
+        @NotNull
+        private QueryRewrite queryRewrite = new QueryRewrite();
+
         public int getTopK() {
             return topK;
         }
@@ -325,13 +329,21 @@ public class RagProperties {
             this.refusal = refusal;
         }
 
-        public Answerability getAnswerability() {
-            return answerability;
-        }
+    public Answerability getAnswerability() {
+        return answerability;
+    }
 
-        public void setAnswerability(Answerability answerability) {
-            this.answerability = answerability;
-        }
+    public void setAnswerability(Answerability answerability) {
+        this.answerability = answerability;
+    }
+
+    public QueryRewrite getQueryRewrite() {
+        return queryRewrite;
+    }
+
+    public void setQueryRewrite(QueryRewrite queryRewrite) {
+        this.queryRewrite = queryRewrite;
+    }
     }
 
     /** RRF 融合参数（R2-H2/H3）。 */
@@ -571,6 +583,70 @@ public class RagProperties {
 
         public void setBulkheadWaitMs(long bulkheadWaitMs) {
             this.bulkheadWaitMs = bulkheadWaitMs;
+        }
+    }
+
+    /**
+     * History-aware Query Rewrite 参数（R6-C）。
+     *
+     * <p><b>职责单一</b>：只把「依赖对话历史的当前问题」改写为可脱离历史独立理解的
+     * 检索查询；Rewriter 失败（超时/模型异常/响应非法）一律回退原始问题——检索增强
+     * 绝不能成为新的单点故障。它与 Answerability Judge 是两个独立的层：rewrite 失败
+     * 不产生任何 Answerability 降级语义。</p>
+     */
+    public static class QueryRewrite {
+
+        /** 是否启用（关闭 = 旧行为：检索永远用原始当前问题）。 */
+        private boolean enabled = true;
+
+        /**
+         * rewrite 模型 HTTP connect/read timeout（秒，单一超时语义，同 Judge R4.1 设计）。
+         * rewrite 只需输出一句短查询，独立于生成模型的 120s 与 Judge 的 15s。
+         */
+        @Min(value = 1, message = "rag.retrieval.query-rewrite.timeout-seconds 必须 ≥ 1")
+        private int timeoutSeconds = 5;
+
+        /**
+         * 改写查询最大长度（字符）。超长输出视为非法（INVALID_RESPONSE）——
+         * 检索查询不应是长文本，超长通常是模型跑题输出了解释段落。
+         */
+        @Min(value = 10, message = "rag.retrieval.query-rewrite.max-query-length 必须 ≥ 10")
+        private int maxQueryLength = 200;
+
+        /** rewrite 提示词里携带的最大历史轮数（0=只用当前问题，等于关闭 rewrite 的收益）。 */
+        @Min(value = 0, message = "rag.retrieval.query-rewrite.max-history-turns 必须 ≥ 0")
+        private int maxHistoryTurns = 4;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public int getTimeoutSeconds() {
+            return timeoutSeconds;
+        }
+
+        public void setTimeoutSeconds(int timeoutSeconds) {
+            this.timeoutSeconds = timeoutSeconds;
+        }
+
+        public int getMaxQueryLength() {
+            return maxQueryLength;
+        }
+
+        public void setMaxQueryLength(int maxQueryLength) {
+            this.maxQueryLength = maxQueryLength;
+        }
+
+        public int getMaxHistoryTurns() {
+            return maxHistoryTurns;
+        }
+
+        public void setMaxHistoryTurns(int maxHistoryTurns) {
+            this.maxHistoryTurns = maxHistoryTurns;
         }
     }
 

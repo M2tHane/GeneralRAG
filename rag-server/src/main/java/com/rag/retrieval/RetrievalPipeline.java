@@ -48,23 +48,39 @@ public class RetrievalPipeline {
     private final Reranker reranker;
     private final DocumentRepository documentRepository;
     private final RagProperties ragProperties;
+    /** R6-C：history-aware query rewrite（可空——单测构造时允许不装配）。 */
+    private final QueryRewriteService queryRewriteService;
 
+    /**
+     * 生产构造（Spring 唯一入口）：注入统一的 QueryRewriteService。
+     * 单测可用 {@link #RetrievalPipeline(EmbeddingModel, EsChunkIndex, RrfFusion,
+     * Reranker, DocumentRepository, RagProperties, QueryRewriteService)} 传 null。
+     */
+    @org.springframework.beans.factory.annotation.Autowired
     public RetrievalPipeline(EmbeddingModel embeddingModel,
                              EsChunkIndex esChunkIndex,
                              RrfFusion rrfFusion,
                              Reranker reranker,
                              DocumentRepository documentRepository,
-                             RagProperties ragProperties) {
+                             RagProperties ragProperties,
+                             QueryRewriteService queryRewriteService) {
         this.embeddingModel = embeddingModel;
         this.esChunkIndex = esChunkIndex;
         this.rrfFusion = rrfFusion;
         this.reranker = reranker;
         this.documentRepository = documentRepository;
         this.ragProperties = ragProperties;
+        this.queryRewriteService = queryRewriteService;
     }
 
     /**
      * 执行一次检索并返回结果与分阶段诊断。
+     *
+     * <p>R6-C：{@code request.history()} 非空且 rewrite 启用时，先用
+     * {@link QueryRewriteService} 把依赖历史的当前问题改写为独立可理解的检索查询
+     * 再进入流水线——Vector/BM25/RRF/Reranker/阈值全部不变，只换输入查询；
+     * rewrite 信息透传到 trace（Debug/Eval 可观测）。rewrite 失败由 Rewriter
+     * 内部回退原始查询，本方法不会因此失败。</p>
      *
      * @return 检索结果（hits 含未过阈值项，以 passedThreshold 区分）+ 阶段耗时/模式/降级
      */
@@ -76,11 +92,24 @@ public class RetrievalPipeline {
         int candidateLimit = request.candidateLimit() != null
                 ? request.candidateLimit() : cfg.getRrf().getCandidateLimit();
 
+        // R6-C：history-aware query rewrite（仅改检索查询；失败回退原始查询）
+        String retrievalQuery = request.question();
+        RetrievalTrace.QueryRewriteInfo rewriteInfo = null;
+        if (queryRewriteService != null && request.history() != null && !request.history().isEmpty()
+                && cfg.getQueryRewrite().isEnabled()) {
+            QueryRewriteService.QueryRewriteResult rewrite =
+                    queryRewriteService.rewrite(request.question(), request.history());
+            retrievalQuery = rewrite.retrievalQuery();
+            rewriteInfo = new RetrievalTrace.QueryRewriteInfo(
+                    rewrite.originalQuery(), rewrite.retrievalQuery(), rewrite.rewritten(),
+                    rewrite.latencyMs(), rewrite.degraded());
+        }
+
         long totalStart = System.currentTimeMillis();
 
         // 阶段 1：向量化（VECTOR/HYBRID/HYBRID_RERANK 都需要问题向量）
         long embedStart = System.currentTimeMillis();
-        float[] queryVector = embed(request.question());
+        float[] queryVector = embed(retrievalQuery);
         long embedMs = System.currentTimeMillis() - embedStart;
 
         // 阶段 2：通道检索
@@ -89,7 +118,7 @@ public class RetrievalPipeline {
                 Math.max(topK, candidateLimit), Math.max(100, 10 * Math.max(topK, candidateLimit)));
         List<EsHit> bm25Hits = mode == RetrievalMode.VECTOR
                 ? List.of()
-                : esChunkIndex.bm25Search(request.kbId(), request.question(),
+                : esChunkIndex.bm25Search(request.kbId(), retrievalQuery,
                         Math.max(topK, candidateLimit));
         long searchMs = System.currentTimeMillis() - searchStart;
 
@@ -193,7 +222,8 @@ public class RetrievalPipeline {
         List<String> finalTopK = ranked.stream().map(h -> h.chunk().chunkId()).toList();
         RetrievalTrace trace = new RetrievalTrace(vectorCandidates, bm25Candidates,
                 unionCandidates, fusedCandidates, preRerankCandidates, rerankedCandidates,
-                finalTopK, new RetrievalTrace.StageTiming(embedMs, searchMs, fusionMs, rerankMs, totalMs));
+                finalTopK, new RetrievalTrace.StageTiming(embedMs, searchMs, fusionMs, rerankMs, totalMs),
+                rewriteInfo);
         return new RetrievalOutcome(ranked, new RetrievalDiagnostics(
                 mode, topK, minScore, candidateLimit, cfg.getRrf().getK(),
                 embedMs, searchMs, totalMs, rerankDegraded, rerankDegradeReason, rerankApplied),

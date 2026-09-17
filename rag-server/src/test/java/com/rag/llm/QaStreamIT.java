@@ -91,6 +91,9 @@ class QaStreamIT {
         registry.add("rag.retrieval.answerability.enabled", () -> "false");
         // 固定 VECTOR 模式：本套件用 8 维假向量，只关心传输语义，不涉及融合/重排
         registry.add("rag.retrieval.mode", () -> "VECTOR");
+        // R6-C：rewrite 行为由 QueryRewriteFlowIT 专门覆盖；本套件断言 SSE 传输语义
+        // （多 case 复用会话会使 history 非空、多一次非流式 rewrite 调用），关闭保持纯净
+        registry.add("rag.retrieval.query-rewrite.enabled", () -> "false");
     }
 
     @AfterAll

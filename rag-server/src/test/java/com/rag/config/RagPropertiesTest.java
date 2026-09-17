@@ -47,6 +47,12 @@ class RagPropertiesTest {
             assertThat(props.getRetrieval().getMinScore()).isEqualTo(0.30);
             assertThat(props.getRetrieval().getMaxContextChars()).isEqualTo(6000);
 
+            // R6-C：Query Rewrite 默认值
+            assertThat(props.getRetrieval().getQueryRewrite().isEnabled()).isTrue();
+            assertThat(props.getRetrieval().getQueryRewrite().getTimeoutSeconds()).isEqualTo(5);
+            assertThat(props.getRetrieval().getQueryRewrite().getMaxQueryLength()).isEqualTo(200);
+            assertThat(props.getRetrieval().getQueryRewrite().getMaxHistoryTurns()).isEqualTo(4);
+
             assertThat(props.getIngestion().getWorkerThreads()).isEqualTo(2);
             assertThat(props.getIngestion().getMaxUploadSizeMb()).isEqualTo(50);
 
@@ -89,6 +95,16 @@ class RagPropertiesTest {
         ).run(context -> {
             assertThat(context).hasFailed();
             assertThat(failureMessages(context)).contains("dimensions");
+        });
+    }
+
+    @Test
+    void zeroQueryRewriteTimeoutFailsStartup() {
+        runner.withPropertyValues(CHAT_BASE_URL, EMBEDDING_BASE_URL,
+                "rag.retrieval.query-rewrite.timeout-seconds=0"
+        ).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(failureMessages(context)).contains("rag.retrieval.query-rewrite.timeout-seconds");
         });
     }
 

@@ -72,6 +72,30 @@ public class ModelClients {
                 .build();
     }
 
+    /**
+     * Query Rewrite 用的阻塞模型（R6-C）。
+     *
+     * <p>与生成/Judge 同一个端点与模型名（本地单模型部署），但独立实例：
+     * HTTP connect/read timeout 直接取 {@code rag.retrieval.query-rewrite.timeout-seconds}
+     * （单一超时语义，同 judgeChatModel 的 R4.1 设计），关闭重试——rewrite 失败的
+     * 语义是"回退原始查询"，重试只会白耗首 token 延迟。与 Judge 不共享 bulkhead：
+     * 两者职责不同（rewrite 逐 QA 一次且仅 history 非空时触发；judge 由判定门控），
+     * rewrite 失败的代价只是回退原查询，不需要独立并发闸门。</p>
+     */
+    @Bean(name = "queryRewriteChatModel")
+    public ChatModel queryRewriteChatModel(RagProperties ragProperties) {
+        RagProperties.Chat chat = ragProperties.getModels().getChat();
+        int timeoutSeconds = ragProperties.getRetrieval().getQueryRewrite().getTimeoutSeconds();
+        return OpenAiChatModel.builder()
+                .baseUrl(chat.getBaseUrl())
+                .apiKey(chat.getApiKey())
+                .modelName(chat.getModelName())
+                .temperature(0.0)
+                .timeout(Duration.ofSeconds(timeoutSeconds))
+                .maxRetries(0)
+                .build();
+    }
+
     @Bean
     public EmbeddingModel embeddingModel(RagProperties ragProperties) {
         RagProperties.Embedding embedding = ragProperties.getModels().getEmbedding();

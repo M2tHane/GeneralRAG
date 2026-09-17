@@ -78,6 +78,9 @@ class EvalFlowIT {
         registry.add("rag.models.chat.base-url", () -> fakeModel.baseUrl());
         registry.add("rag.models.embedding.base-url", () -> fakeModel.baseUrl());
         registry.add("rag.models.startup-check", () -> "false");
+        // R6-C：本套件非流式请求 = Judge（顺序响应 stub 精确对位）；rewrite 也是非流式
+        // 请求，会错位 stub 序列。rewrite 由 QueryRewriteFlowIT 专门覆盖，此处关闭
+        registry.add("rag.retrieval.query-rewrite.enabled", () -> "false");
     }
 
     @AfterAll

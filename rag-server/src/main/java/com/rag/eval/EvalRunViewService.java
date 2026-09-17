@@ -117,6 +117,9 @@ public class EvalRunViewService {
         view.put("answerabilityReason", item.getAnswerabilityReason());
         view.put("answerabilityDegraded", item.getAnswerabilityDegraded());
         view.put("answerabilityLatencyMs", item.getAnswerabilityLatencyMs());
+        // R6-C：实际检索查询与改写标记（BadCase 归因：改写了什么；旧数据为 null）
+        view.put("retrievalQuery", item.getRetrievalQuery());
+        view.put("queryRewritten", item.getQueryRewritten());
         // R2-E2：正确答案分块的首个命中位次（对已落库 retrieved 快照复算，与指标口径同源）
         view.put("evidenceRank", evidenceRank(item, datasetItem));
         view.put("reviewTag", item.getReviewTag() == null ? null : item.getReviewTag().name());
