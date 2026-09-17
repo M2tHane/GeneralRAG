@@ -84,6 +84,17 @@ curl -N -X POST http://localhost:8080/api/v1/qa/stream -H 'Content-Type: applica
 
 默认 `pdf-parser=pdfbox`，**最小启动不需要 MinerU**，普通文本 PDF 直接入库。
 
+## Architecture / Documentation
+
+Current-State 架构文档（入口与分层索引见 `docs/README.md`）：
+
+- [System Architecture](docs/ARCHITECTURE.md) — 组件职责、数据流、存储分工
+- [Ingestion](docs/INGESTION.md) — 入库状态机、解析器、PDF AUTO 路由、双层内容
+- [Retrieval & QA](docs/RETRIEVAL-AND-QA.md) — Query Rewrite、混合检索、RRF、重排、两层拒答、Judge
+- [Evaluation](docs/EVALUATION.md) — 评测架构与指标口径（生产管线复用）
+- [Engineering Decisions](docs/ENGINEERING-DECISIONS.md) — 11 个关键决策与 tradeoff
+- [Evolution](docs/EVOLUTION.md) — Eval / BadCase 驱动的演进叙事
+
 ## Demo
 
 仓库提供一套独立于 Eval Dataset 的 Golden Demo（`demo/`，Aurora Cloud 主题，6 份短文档 + 12 个演示问题），
