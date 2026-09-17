@@ -661,19 +661,97 @@ public class RagProperties {
         private int maxUploadSizeMb = 50;
 
         /**
-         * PDF 解析器选择（R3-P2）：pdfbox（默认，纯文本层提取）| mineru
-         * （远端 mineru-api 服务，支持复杂版面/扫描件 OCR）。
+         * PDF 解析器选择（R3-P2；R6-D 扩展 auto）：pdfbox（默认，纯文本层提取）| mineru
+         * （远端 mineru-api 服务，支持复杂版面/扫描件 OCR）| auto（PDFBox 质量探针 +
+         * 确定性规则路由；探针失败/低文本/空页过多/低质量/乱码 → mineru，其余 → pdfbox）。
          */
-        @jakarta.validation.constraints.Pattern(regexp = "pdfbox|mineru",
-                message = "rag.ingestion.pdf-parser 只支持 pdfbox|mineru")
+        @jakarta.validation.constraints.Pattern(regexp = "pdfbox|mineru|auto",
+                message = "rag.ingestion.pdf-parser 只支持 pdfbox|mineru|auto")
         private String pdfParser = "pdfbox";
 
-        /** mineru-api 服务基址（pdf-parser=mineru 时必填），如 http://localhost:8000。 */
+        /** mineru-api 服务基址（pdf-parser=mineru 或 auto 路由到 mineru 时为调用目标），如 http://localhost:8000。 */
         private String mineruBaseUrl = "";
 
         /** mineru-api 调用超时（秒）：扫描件 OCR 较慢，长于常规 HTTP 调用。 */
         @Min(value = 1, message = "rag.ingestion.mineru-timeout-seconds 必须 ≥ 1")
         private int mineruTimeoutSeconds = 600;
+
+        /** PDF AUTO 路由参数（R6-D；仅 pdf-parser=auto 时生效）。 */
+        private PdfAuto pdfAuto = new PdfAuto();
+
+        /** R6-D PDF AUTO 路由阈值：全部确定性规则，无 LLM 参与。 */
+        public static class PdfAuto {
+
+            /** 全文有效字符总数下限（trim 后去除空白），低于该值 → LOW_TEXT_DENSITY → mineru。 */
+            @Min(value = 0, message = "rag.ingestion.pdf-auto.min-chars 必须 ≥ 0")
+            private int minChars = 100;
+
+            /** 单页平均有效字符数下限，低于该值 → LOW_TEXT_DENSITY → mineru。 */
+            @Min(value = 0, message = "rag.ingestion.pdf-auto.min-chars-per-page 必须 ≥ 0")
+            private int minCharsPerPage = 30;
+
+            /** 空文本页占比上限（有效字符 < empty-page-char-threshold 的页 / 总页数），超过 → mineru。 */
+            @Min(value = 0, message = "rag.ingestion.pdf-auto.max-empty-page-ratio 必须 ≥ 0")
+            private double maxEmptyPageRatio = 0.8;
+
+            /** 判定空文本页的单页有效字符阈值。 */
+            @Min(value = 0, message = "rag.ingestion.pdf-auto.empty-page-char-threshold 必须 ≥ 0")
+            private int emptyPageCharThreshold = 20;
+
+            /** 可打印字符占比下限（按 Unicode 类别，中文/英文/数字/常见标点均算可打印），低于 → LOW_TEXT_QUALITY → mineru。 */
+            private double minPrintableRatio = 0.90;
+
+            /** U+FFFD replacement 字符占比上限（按非空白字符），超过 → GARBLED_TEXT → mineru。 */
+            private double maxReplacementCharRatio = 0.05;
+
+            public int getMinChars() {
+                return minChars;
+            }
+
+            public void setMinChars(int minChars) {
+                this.minChars = minChars;
+            }
+
+            public int getMinCharsPerPage() {
+                return minCharsPerPage;
+            }
+
+            public void setMinCharsPerPage(int minCharsPerPage) {
+                this.minCharsPerPage = minCharsPerPage;
+            }
+
+            public double getMaxEmptyPageRatio() {
+                return maxEmptyPageRatio;
+            }
+
+            public void setMaxEmptyPageRatio(double maxEmptyPageRatio) {
+                this.maxEmptyPageRatio = maxEmptyPageRatio;
+            }
+
+            public int getEmptyPageCharThreshold() {
+                return emptyPageCharThreshold;
+            }
+
+            public void setEmptyPageCharThreshold(int emptyPageCharThreshold) {
+                this.emptyPageCharThreshold = emptyPageCharThreshold;
+            }
+
+            public double getMinPrintableRatio() {
+                return minPrintableRatio;
+            }
+
+            public void setMinPrintableRatio(double minPrintableRatio) {
+                this.minPrintableRatio = minPrintableRatio;
+            }
+
+            public double getMaxReplacementCharRatio() {
+                return maxReplacementCharRatio;
+            }
+
+            public void setMaxReplacementCharRatio(double maxReplacementCharRatio) {
+                this.maxReplacementCharRatio = maxReplacementCharRatio;
+            }
+        }
 
         public int getWorkerThreads() {
             return workerThreads;
@@ -713,6 +791,14 @@ public class RagProperties {
 
         public void setMineruTimeoutSeconds(int mineruTimeoutSeconds) {
             this.mineruTimeoutSeconds = mineruTimeoutSeconds;
+        }
+
+        public PdfAuto getPdfAuto() {
+            return pdfAuto;
+        }
+
+        public void setPdfAuto(PdfAuto pdfAuto) {
+            this.pdfAuto = pdfAuto;
         }
     }
 

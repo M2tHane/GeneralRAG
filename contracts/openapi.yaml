@@ -168,6 +168,10 @@ paths:
         PDF 解析器可配置（rag.ingestion.pdf-parser）：默认 pdfbox（仅文本层）；配置为 mineru 时
         调远端 mineru-api 服务解析复杂版面/扫描件（OCR），服务不可达时任务失败
         （failureReason=PARSER_UNAVAILABLE，502），不静默回退。
+        R6-D 增加 auto：上传后 PDFBox 质量探针 + 确定性规则路由（探针失败/低文本密度/
+        空文本页过多/低质量文本/乱码 → mineru，其余 → pdfbox）。AUTO 一旦选定 parser，
+        该 parser 正式解析失败即任务失败，禁止换 parser 静默回退；路由决策与探针指标
+        记录在 document 详情的 parseMetadata.parser（selected/routingReason/probe）。
         多版本语义（R3-P3）：KB 内同名同类型且内容不同 → 作为该文档组的新版本并自动激活
         （激活切换在上传受理时发生，入库期间旧版本仍可检索）；同内容 → 409（不论版本组）。
         删除激活版本时组内自动回落激活最新的 COMPLETED 旧版。
@@ -950,6 +954,17 @@ components:
           properties:
             chunkConfig: { $ref: "#/components/schemas/ChunkingConfig" }
             contentSha256: { type: string }
+            parseMetadata:
+              type: object
+              nullable: true
+              description: |
+                PDF AUTO 路由元数据（R6-D，仅 pdf-parser=auto 且解析成功后非空）：
+                {parser: {requested: "AUTO", selected: "PDFBOX|MINERU",
+                          routingReason: "TEXT_PDF|LOW_TEXT_DENSITY|TOO_MANY_EMPTY_TEXT_PAGES|
+                                         LOW_TEXT_QUALITY|GARBLED_TEXT|PROBE_FAILED",
+                          probe: {pageCount, charCount, charsPerPage, emptyPageRatio,
+                                  printableRatio, replacementCharRatio, probeLatencyMs}}}。
+                手动 pdfbox/mineru 模式恒为 null。
             failureStage:
               $ref: "#/components/schemas/PipelineStage"
             failureReason:

@@ -6,8 +6,9 @@ import java.time.LocalDateTime;
 
 /**
  * 文档详情（契约 DocumentDetail = Document allOf {chunkConfig, contentSha256,
- * failureStage?, failureReason?, task?}）。task 为内嵌当前任务摘要，
+ * parseMetadata?, failureStage?, failureReason?, task?}）。task 为内嵌当前任务摘要，
  * 详情以 GET /documents/{docId}/task 为准（契约该端点 description）。
+ * parseMetadata 为 PDF AUTO 路由元数据（R6-D），手动模式/非 PDF 恒 null。
  */
 public record DocumentDetail(
         String id,
@@ -25,6 +26,7 @@ public record DocumentDetail(
         LocalDateTime updatedAt,
         ChunkingConfig chunkConfig,
         String contentSha256,
+        java.util.Map<String, Object> parseMetadata,
         PipelineStage failureStage,
         String failureReason,
         IngestionTask task) {

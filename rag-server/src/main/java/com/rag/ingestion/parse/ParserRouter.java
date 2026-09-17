@@ -20,6 +20,11 @@ public class ParserRouter {
 
     public ParserRouter(List<DocumentParser> candidates) {
         for (DocumentParser parser : candidates) {
+            // R6-D：AUTO 委托候选（PdfBoxParser/MineruParser in auto 模式）不占路由表条目；
+            // PDF 入口由 AutoPdfParser 独占。routeable() 默认 true，其它 parser 不受影响。
+            if (!parser.routeable()) {
+                continue;
+            }
             DocumentParser existing = parsers.put(parser.supportedType(), parser);
             if (existing != null) {
                 throw new IllegalStateException(

@@ -4,6 +4,7 @@ import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -82,6 +83,7 @@ public class IngestionTaskManager {
             new com.rag.ingestion.chunk.SpreadsheetChunker();
     private final EmbeddingGateway embeddingGateway;
     private final com.rag.ingestion.chunk.RetrievalContentEnricher retrievalContentEnricher;
+    private final RagProperties ragProperties;
     private final java.util.concurrent.ExecutorService executor;
 
     public IngestionTaskManager(IngestionTaskRepository taskRepository,
@@ -98,6 +100,7 @@ public class IngestionTaskManager {
         this.objectStore = objectStore;
         this.esChunkIndex = esChunkIndex;
         this.parserRouter = parserRouter;
+        this.ragProperties = ragProperties;
         for (Chunker chunker : chunkerList) {
             Chunker existing = chunkers.put(chunker.strategy(), chunker);
             if (existing != null) {
@@ -259,10 +262,44 @@ public class IngestionTaskManager {
         try (InputStream in = objectStore.getSource(doc.getKbId(), doc.getId(),
                 sourceExtensions.get(doc.getFileType()))) {
             ParsedDocument parsed = parser.parse(in, doc.getFileType());
+            // R6-D：解析路由元数据持久化到 document.parse_metadata，保证
+            // "这个 PDF 为什么被送到 MinerU / 实际谁解析的"可复盘。
+            // AUTO：report 携带 selected/routingReason/probe；手动：requested=selected，
+            // routingReason=null（§16 语义）。定向 UPDATE（理由同 updateStatusFields）；
+            // 非 PDF 文件类型每种格式只有一个 parser，无路由信息可记，不写。
+            if (doc.getFileType() == FileType.PDF) {
+                documentRepository.updateParseMetadata(doc.getId(),
+                        parseMetadataOf(doc, parsed.parseReport()));
+            }
             ctx.parsed = parsed.withDocumentName(doc.getName());
         } catch (java.io.IOException e) {
             throw new DomainException(ErrorCode.INTERNAL_ERROR, "关闭源文件流失败：" + e.getMessage());
         }
+    }
+
+    /** R6-D：ParseReport → document.parse_metadata JSON 结构（结构示例见 V8 迁移注释）。 */
+    private Map<String, Object> parseMetadataOf(DocumentEntity doc, com.rag.ingestion.parse.ParseReport report) {
+        String requested = ragProperties.getIngestion().getPdfParser().toUpperCase(java.util.Locale.ROOT);
+        Map<String, Object> parser = new LinkedHashMap<>();
+        parser.put("requested", requested);
+        parser.put("selected", report != null ? report.selectedParser() : requested);
+        parser.put("routingReason", report != null ? report.routingReason() : null);
+        if (report != null) {
+            com.rag.ingestion.parse.PdfQualityMetrics m = report.probe();
+            Map<String, Object> probe = new LinkedHashMap<>();
+            probe.put("pageCount", m.pageCount());
+            probe.put("charCount", m.charCount());
+            probe.put("charsPerPage", m.charsPerPage());
+            probe.put("emptyPageRatio", m.emptyPageRatio());
+            probe.put("printableRatio", m.printableRatio());
+            probe.put("replacementCharRatio", m.replacementCharRatio());
+            probe.put("probeLatencyMs", m.probeLatencyMs());
+            parser.put("probe", probe);
+        }
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("docId", doc.getId());
+        metadata.put("parser", parser);
+        return metadata;
     }
 
     private void clean(StageContext ctx) {

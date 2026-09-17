@@ -15,10 +15,12 @@ import com.rag.domain.enums.FileType;
  * 清洗阶段按页清洗后仍以 \f 拼接落盘，不变式贯穿 PARSING → CLEANING → CHUNKING。</p>
  *
  * <p>{@code documentName} 由流水线在解析后补充（仅作 titlePath 前缀展示，
- * 不参与对象键拼接，路线 §7）。</p>
+ * 不参与对象键拼接，路线 §7）。{@code parseReport} 仅 AUTO 解析器填充（R6-D）：
+ * 路由决策与探针指标，随产物上浮供流水线持久化；其余 parser 恒为 null。</p>
  */
 public record ParsedDocument(String documentName, String text,
-                             List<ParsedPage> pages, List<Heading> headings) {
+                             List<ParsedPage> pages, List<Heading> headings,
+                             ParseReport parseReport) {
 
     /** PDF 逐页文本在 parsed.txt 中的分隔符（form feed）。 */
     public static final char PAGE_SEPARATOR = '\f';
@@ -26,6 +28,12 @@ public record ParsedDocument(String documentName, String text,
     public ParsedDocument {
         pages = pages == null ? List.of() : List.copyOf(pages);
         headings = headings == null ? List.of() : List.copyOf(headings);
+    }
+
+    /** 兼容旧 4 参构造（parseReport=null）。 */
+    public ParsedDocument(String documentName, String text,
+                          List<ParsedPage> pages, List<Heading> headings) {
+        this(documentName, text, pages, headings, null);
     }
 
     /** 无页结构（MD/TXT）：全文 + 可空标题序列。 */
@@ -42,9 +50,14 @@ public record ParsedDocument(String documentName, String text,
         return new ParsedDocument(null, String.join(String.valueOf(PAGE_SEPARATOR), pageTexts), pages, List.of());
     }
 
-    /** 流水线在解析后补充文档名（titlePath 前缀）。 */
+    /** 流水线在解析后补充文档名（titlePath 前缀）；parseReport 原样保留。 */
     public ParsedDocument withDocumentName(String documentName) {
-        return new ParsedDocument(documentName, text, pages, headings);
+        return new ParsedDocument(documentName, text, pages, headings, parseReport);
+    }
+
+    /** AUTO 解析器附加路由报告（R6-D）。 */
+    public ParsedDocument withParseReport(ParseReport report) {
+        return new ParsedDocument(documentName, text, pages, headings, report);
     }
 
     /** 是否带逐页结构（PDF）。 */

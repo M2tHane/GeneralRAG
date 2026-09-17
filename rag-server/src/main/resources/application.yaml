@@ -133,11 +133,27 @@ rag:
   ingestion:
     worker-threads: 2
     max-upload-size-mb: 50
-    # PDF 解析器：pdfbox（默认，文本层）| mineru（远端 mineru-api，复杂版面/扫描件 OCR）
+    # PDF 解析器：pdfbox（默认，文本层）| mineru（远端 mineru-api，复杂版面/扫描件 OCR）| auto（R6-D 质量探针路由）
     pdf-parser: ${RAG_INGESTION_PDF_PARSER:pdfbox}
     mineru-base-url: ${MINERU_BASE_URL:}
     # 扫描件 OCR 较慢，超时按分钟级给
     mineru-timeout-seconds: ${MINERU_TIMEOUT_SECONDS:600}
+    # R6-D：PDF AUTO 路由（仅 pdf-parser=auto 生效）。规则顺序固定：
+    # 探针失败 → LOW_TEXT_DENSITY（charCount/charsPerPage）→ TOO_MANY_EMPTY_TEXT_PAGES
+    # → LOW_TEXT_QUALITY（printableRatio）→ GARBLED_TEXT（replacementCharRatio）→ 其余 TEXT_PDF
+    pdf-auto:
+      # 全文有效字符（去空白）总数下限
+      min-chars: 100
+      # 单页平均有效字符数下限
+      min-chars-per-page: 30
+      # 空文本页占比上限（有效字符 < empty-page-char-threshold 的页 / 总页数）
+      max-empty-page-ratio: 0.8
+      # 单页判空的有效字符阈值
+      empty-page-char-threshold: 20
+      # 可打印字符（Unicode 类别，中英文/数字/常见标点均算）占比下限
+      min-printable-ratio: 0.90
+      # U+FFFD 替换字符占比上限（按非空白字符）
+      max-replacement-char-ratio: 0.05
   elasticsearch:
     # 分块正文分析器；ES 镜像未装 IK 插件时改 standard（见 docker-compose.yml 注释）
     content-analyzer: ik_max_word

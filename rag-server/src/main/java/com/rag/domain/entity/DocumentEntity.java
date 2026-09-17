@@ -97,6 +97,15 @@ public class DocumentEntity {
     @Column(name = "parsed_object_key", length = 255)
     private String parsedObjectKey;
 
+    /**
+     * 解析路由元数据（R6-D，JSON 列）：仅 PDF AUTO 模式填充——
+     * {parser:{requested,selected,routingReason,probe:{...}}}；手动模式恒 null
+     * （requestedParser 由全局配置承载，无需冗余落库）。
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "parse_metadata", columnDefinition = "json")
+    private Map<String, Object> parseMetadata;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "failure_stage", length = 16)
     private PipelineStage failureStage;
@@ -242,6 +251,14 @@ public class DocumentEntity {
 
     public void setParsedObjectKey(String parsedObjectKey) {
         this.parsedObjectKey = parsedObjectKey;
+    }
+
+    public Map<String, Object> getParseMetadata() {
+        return parseMetadata;
+    }
+
+    public void setParseMetadata(Map<String, Object> parseMetadata) {
+        this.parseMetadata = parseMetadata;
     }
 
     public PipelineStage getFailureStage() {

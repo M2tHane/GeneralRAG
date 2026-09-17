@@ -15,7 +15,7 @@ import com.rag.domain.exception.DomainException;
 import com.rag.domain.exception.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
 
 /**
@@ -41,13 +41,13 @@ import org.springframework.stereotype.Component;
  * 远端解析失败 → 解析失败语义（422 SCANNED_PDF_NOT_SUPPORTED 不适用于此，统一
  * PARSER_FAILED 语义并携带远端信息）。</p>
  *
- * <p>启用条件：{@code rag.ingestion.pdf-parser=mineru}（Bean 注册开关）且
- * mineru-base-url 非空（调用目标）。未选 mineru 时本 Bean 不注册，PDF 路由到
- * PdfBoxParser（ParserRouter 按 FileType 唯一注册，两个 PDF 解析器互斥）。
- * 本机部署见 docs/round3/02-实施记录-P2.md。</p>
+ * <p>启用条件（R3-P2；R6-D 扩展）：{@code rag.ingestion.pdf-parser=mineru}（手动直连）
+ * 或 auto（仅作为 {@link AutoPdfParser} 的委托候选；PDF 的 ParserRouter 路由表入口
+ * 由 AutoPdfParser 独占）且 mineru-base-url 非空（调用目标）。未选 mineru/auto 时本
+ * Bean 不注册。本机部署见 docs/round3/02-实施记录-P2.md。</p>
  */
 @Component
-@ConditionalOnProperty(name = "rag.ingestion.pdf-parser", havingValue = "mineru")
+@Conditional(MineruParserEnabled.class)
 public class MineruParser implements DocumentParser {
 
     private static final Logger log = LoggerFactory.getLogger(MineruParser.class);
@@ -61,6 +61,7 @@ public class MineruParser implements DocumentParser {
     private final Duration timeout;
     private final HttpClient http;
     private final boolean boundarySet;
+    private final RagProperties properties;
 
     /**
      * @param enabled    rag.ingestion.pdf-parser == mineru
@@ -68,6 +69,7 @@ public class MineruParser implements DocumentParser {
      * @param timeout    rag.ingestion.mineru-timeout-seconds
      */
     public MineruParser(RagProperties properties) {
+        this.properties = properties;
         RagProperties.Ingestion cfg = properties.getIngestion();
         this.baseUrl = stripTrailingSlash(cfg.getMineruBaseUrl());
         this.timeout = Duration.ofSeconds(cfg.getMineruTimeoutSeconds());
@@ -90,6 +92,12 @@ public class MineruParser implements DocumentParser {
     @Override
     public FileType supportedType() {
         return FileType.PDF;
+    }
+
+    /** AUTO 模式下不占 ParserRouter 路由表条目（仅作为 AutoPdfParser 委托候选）。 */
+    @Override
+    public boolean routeable() {
+        return !"auto".equals(properties.getIngestion().getPdfParser());
     }
 
     @Override

@@ -290,7 +290,7 @@ public class DocumentService {
                 doc.getSizeBytes(), doc.getStatus().name(), doc.getCurrentStage().name(),
                 doc.getChunkCount(), doc.getRootId(), doc.getVersionNo(), doc.isActive(),
                 doc.getCreatedAt(), doc.getUpdatedAt(),
-                toChunkingConfig(doc), doc.getContentSha256(),
+                toChunkingConfig(doc), doc.getContentSha256(), doc.getParseMetadata(),
                 doc.getFailureStage(), doc.getFailureReason(), task == null ? null : toTask(task));
     }
 

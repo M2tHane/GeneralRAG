@@ -69,6 +69,10 @@ export interface paths {
          *     PDF 解析器可配置（rag.ingestion.pdf-parser）：默认 pdfbox（仅文本层）；配置为 mineru 时
          *     调远端 mineru-api 服务解析复杂版面/扫描件（OCR），服务不可达时任务失败
          *     （failureReason=PARSER_UNAVAILABLE，502），不静默回退。
+         *     R6-D 增加 auto：上传后 PDFBox 质量探针 + 确定性规则路由（探针失败/低文本密度/
+         *     空文本页过多/低质量文本/乱码 → mineru，其余 → pdfbox）。AUTO 一旦选定 parser，
+         *     该 parser 正式解析失败即任务失败，禁止换 parser 静默回退；路由决策与探针指标
+         *     记录在 document 详情的 parseMetadata.parser（selected/routingReason/probe）。
          *     多版本语义（R3-P3）：KB 内同名同类型且内容不同 → 作为该文档组的新版本并自动激活
          *     （激活切换在上传受理时发生，入库期间旧版本仍可检索）；同内容 → 409（不论版本组）。
          *     删除激活版本时组内自动回落激活最新的 COMPLETED 旧版。
@@ -380,7 +384,13 @@ export interface paths {
          *     R4.1 起支持——FOLLOW_UP 类样本提供会话历史以解析指代；历史仅用于理解当前问题，
          *     不构成回答证据，检索仍只使用当前问题）、answerable（是否可回答）、category
          *     （DIRECT/TERM_VARIATION/FOLLOW_UP/OUT_OF_KB/CONFUSABLE/PARTIAL_EVIDENCE）。
-         *     JSON 文件为对象数组；CSV 表头须与字段同名（evidence/history 列为 JSON 字符串）。
+         *     R6-A（Hard Eval）可选字段：failureMode（负例失败机理，EvalFailureMode；
+         *     answerable=true 时禁止设置，answerable=false 时必填）、evidenceMode（正例证据形态，
+         *     EvalEvidenceMode；answerable=false 时禁止设置）、temptingEvidence（负例诱导性证据，
+         *     EvidenceRef[] 结构）、missingRequirement（负例缺失条件说明，≤500 字符；
+         *     temptingEvidence/missingRequirement 仅负例可用）。违反一致性校验的样本整文件
+         *     以 422 拒绝导入，不做静默修正。
+         *     JSON 文件为对象数组；CSV 表头须与字段同名（evidence/history/temptingEvidence 列为 JSON 字符串）。
          */
         post: operations["importEvalDataset"];
         delete?: never;
@@ -559,6 +569,16 @@ export interface components {
         DocumentDetail: components["schemas"]["Document"] & {
             chunkConfig: components["schemas"]["ChunkingConfig"];
             contentSha256: string;
+            /**
+             * @description PDF AUTO 路由元数据（R6-D，仅 pdf-parser=auto 且解析成功后非空）：
+             *     {parser: {requested: "AUTO", selected: "PDFBOX|MINERU",
+             *               routingReason: "TEXT_PDF|LOW_TEXT_DENSITY|TOO_MANY_EMPTY_TEXT_PAGES|
+             *                              LOW_TEXT_QUALITY|GARBLED_TEXT|PROBE_FAILED",
+             *               probe: {pageCount, charCount, charsPerPage, emptyPageRatio,
+             *                       printableRatio, replacementCharRatio, probeLatencyMs}}}。
+             *     手动 pdfbox/mineru 模式恒为 null。
+             */
+            parseMetadata?: Record<string, never> | null;
             failureStage?: components["schemas"]["PipelineStage"];
             /** @description 失败错误码 + 人读文案（status=FAILED 时非空） */
             failureReason?: string;
@@ -771,6 +791,17 @@ export interface components {
              * @enum {string|null}
              */
             mode?: "VECTOR" | "HYBRID" | "HYBRID_RERANK" | null;
+            /**
+             * @description R6-C：会话历史（时间正序，[{role: user|assistant, content}]）。非空时经由
+             *     统一检索流水线触发 history-aware query rewrite——仅改变检索查询，
+             *     Answerability 判定与上下文仍基于原始 question。响应 queryRewrite 字段
+             *     透出改写结果；本字段内容不会回显到响应中。
+             */
+            history?: {
+                /** @enum {string} */
+                role: "user" | "assistant";
+                content: string;
+            }[] | null;
         };
         /**
          * @description 检索模式（R2-H）。VECTOR=仅向量 kNN（第一轮基线）；HYBRID=BM25 与向量双通道候选 + 应用侧 RRF 融合；
@@ -827,7 +858,11 @@ export interface components {
          *     回答/拒答的<b>原因</b>，供调试与评测归因：
          *     LOW_SCORE_REFUSAL=低于低分阈值直接拒答（未调 Judge）；NO_HITS=零命中直接拒答；
          *     JUDGE_ACCEPT/JUDGE_REFUSE=灰区与高分由 Evidence Sufficiency Judge 判定
-         *     （R4 Baseline 证明高分不可答与可答分数完全重叠，不存在安全的"高分直答"阈值）；
+         *     （R4 Baseline 证明高分不可答与可答分数完全重叠，不存在安全的"高分直答"阈值；
+         *     R6-B 起 Judge 判定语义收紧为「仅依赖给定证据是否足以完整、可靠、不过度推断地
+         *     回答」：相关≠充分，需额外算术/聚合/占比等派生推理的新事实判 insufficient，
+         *     yes/no 型问题证据明确反驳命题即 sufficient，多块证据各自支撑所需事实的组合判
+         *     sufficient）；
          *     JUDGE_DEGRADED=Judge 失败按降级策略处理（二级结构化原因见
          *     AnswerabilityFailureType；decision reason 保留人类可读前缀）；ANSWERABILITY_DISABLED=
          *     判定关闭（仅对照，行为同旧 RefusalPolicy）。
@@ -899,6 +934,18 @@ export interface components {
              */
             answerability?: components["schemas"]["AnswerabilityDecision"] | null;
             issues: components["schemas"]["DebugIssue"][];
+            /**
+             * @description R6-C：本次检索的查询改写信息（history 非空且 rewrite 启用时非 null；
+             *     未启用/未触发为 null——不虚构改写）。
+             */
+            queryRewrite?: {
+                /** @description 用户原始问题 */
+                originalQuery: string;
+                /** @description 实际送入检索流水线的查询 */
+                retrievalQuery: string;
+                /** @description 是否发生改写（false=保持原问题或失败回退） */
+                queryRewritten: boolean;
+            } | null;
         };
         /**
          * @description 调优集与独立测试集严格分离（EV-6）
@@ -912,6 +959,21 @@ export interface components {
          * @enum {string}
          */
         EvalCategory: "DIRECT" | "TERM_VARIATION" | "FOLLOW_UP" | "OUT_OF_KB" | "CONFUSABLE" | "PARTIAL_EVIDENCE";
+        /**
+         * @description R6-A：负例（answerable=false）失败机理。诊断负例时按机理分组统计 FAR，
+         *     比整体 FAR 更能定位应该优化哪一层。answerable=true 的样本必须为 null，
+         *     两个字段不允许矛盾状态（导入校验拒绝）。
+         * @enum {string|null}
+         */
+        EvalFailureMode: "OUT_OF_KB" | "PARTIAL_EVIDENCE" | "MISSING_CONDITION" | "ENTITY_MISMATCH" | "SCOPE_MISMATCH" | "NUMERIC_MISMATCH" | "VERSION_CONFLICT" | "UNSUPPORTED_INFERENCE" | null;
+        /**
+         * @description R6-A：正例（answerable=true）证据形态。SINGLE_CHUNK=一块证据足够；
+         *     MULTI_CHUNK=多块 required evidence 必须共同覆盖（附加 Evidence Coverage 指标）；
+         *     FOLLOW_UP=当前问题依赖 history 做指代解析（history 只用于解析指代，不构成证据）。
+         *     answerable=false 的样本必须为 null。
+         * @enum {string|null}
+         */
+        EvalEvidenceMode: "SINGLE_CHUNK" | "MULTI_CHUNK" | "FOLLOW_UP" | null;
         EvidenceRef: {
             docName?: string;
             titlePath?: string;
@@ -982,6 +1044,30 @@ export interface components {
             recallAt5?: number | null;
             /** @description R2-E2 MRR = 每题首个命中证据分块排名倒数的平均值（未召回计 0） */
             mrr?: number | null;
+            /**
+             * @description R6-A Evidence Coverage 均值：逐题（召回的 required evidence 数 / 该题
+             *     required evidence 总数）后跨题平均。与 recallAt5（证据 chunk 总数口径）
+             *     并存；Hit@K 定义不变，本指标为新增诊断口径，回答"多块证据被完整召回的程度"。
+             */
+            evidenceCoverageAvg?: number | null;
+            /** @description R6-A coverage==1.0（required evidence 全部命中）的题占 answerable 题比例。 */
+            fullEvidenceCoverageRate?: number | null;
+            /**
+             * @description R6-A 负例按 failureMode 分组：每类 {count, answered(FP), refused(TN), far}。
+             *     far = FP/(FP+TN)，样本级口径与整体混淆矩阵同源。比整体 FAR 更能定位该优化哪一层。
+             */
+            failureModeBreakdown?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * @description R6-A 正例按 evidenceMode 分组：每类 {count, hitAt1/3/5, mrr,
+             *     evidenceCoverageAvg（macro：逐题 coverage 后平均，与全局口径一致）,
+             *     fullEvidenceCoverageRate, evidenceRecall（micro：covered chunks / required chunks 总数）,
+             *     refused, frr}。R6-A.1 起 evidenceCoverageAvg 与 evidenceRecall 两个口径明确区分。
+             */
+            evidenceModeBreakdown?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * @description R2-E3 拒答正确率 = (answerable=false 且拒答 + answerable=true 且未拒答) / 已执行题数。
              *     与 Hit@K 分列：资料外题的"是否安全拒答"不再因退出 Hit@K 分母而消失。
@@ -1105,6 +1191,20 @@ export interface components {
             referenceAnswer?: string | null;
             answerable?: boolean;
             category?: components["schemas"]["EvalCategory"];
+            /** @description R6-A 负例失败机理（来自数据集标签；正例为 null） */
+            failureMode?: components["schemas"]["EvalFailureMode"];
+            /** @description R6-A 正例证据形态（来自数据集标签；负例为 null） */
+            evidenceMode?: components["schemas"]["EvalEvidenceMode"];
+            /** @description R6-A 负例诱导性证据（EvidenceRef[] 结构；正例为 null） */
+            temptingEvidence?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** @description R6-A 负例缺失的关键条件说明；正例为 null */
+            missingRequirement?: string | null;
+            /** @description 参考证据原文（EvidenceRef[]，与数据集标签同源；供 BadCase 对照） */
+            evidence?: {
+                [key: string]: unknown;
+            }[] | null;
             /** @description 本次运行的检索命中（快照） */
             retrieved: components["schemas"]["EvalHit"][];
             generatedAnswer?: string | null;
@@ -1141,6 +1241,14 @@ export interface components {
             answerabilityDegraded?: boolean | null;
             /** @description R4 判定耗时（毫秒） */
             answerabilityLatencyMs?: number | null;
+            /**
+             * @description R6-C：本次实际使用的检索查询（history-aware rewrite 后；未改写时等于
+             *     question 本身）。旧数据/未执行为 NULL。Judge/Generation 仍使用原始
+             *     question，本字段只反映检索层输入。
+             */
+            retrievalQuery?: string | null;
+            /** @description R6-C：检索查询是否发生 history-aware 改写；旧数据/未执行为 NULL */
+            queryRewritten?: boolean | null;
             /**
              * @description 人工标记的失败原因；未标注为 null
              * @enum {string|null}

@@ -9,7 +9,7 @@ import com.rag.domain.exception.DomainException;
 import com.rag.domain.exception.ErrorCode;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
 
 /**
@@ -20,17 +20,35 @@ import org.springframework.stereotype.Component;
  * <p>扫描件检测（异步，路线 §12 决策 1）：首页无文本层 →
  * {@link ErrorCode#SCANNED_PDF_NOT_SUPPORTED}，任务 FAILED 并在前端行内提示。</p>
  *
- * <p>注册条件（R3-P2）：{@code rag.ingestion.pdf-parser} 缺省或为 pdfbox 时注册；
- * 配置为 mineru 时由 {@link MineruParser} 接管 PDF（两者按 FileType 互斥，
- * ParserRouter 重复注册会启动失败）。</p>
+ * <p>注册条件（R3-P2；R6-D 扩展）：{@code rag.ingestion.pdf-parser} 缺省或为 pdfbox 时
+ * 手动注册（ParserRouter 直接路由）；配置为 auto 时仍注册，但仅作为 {@link AutoPdfParser}
+ * 的委托候选（PDF 的 ParserRouter 路由表入口由 AutoPdfParser 独占——否则 AUTO 下
+ * PDF 有两个 FileType.PDF 实现，ParserRouter 重复注册会启动失败）；配置为 mineru 时
+ * 由 {@link MineruParser} 接管。</p>
  */
 @Component
-@ConditionalOnProperty(name = "rag.ingestion.pdf-parser", havingValue = "pdfbox", matchIfMissing = true)
+@Conditional(PdfBoxParserEnabled.class)
 public class PdfBoxParser implements DocumentParser {
 
     @Override
     public FileType supportedType() {
         return FileType.PDF;
+    }
+
+    /**
+     * AUTO 模式下不占 ParserRouter 路由表条目（仅作为 AutoPdfParser 委托候选）。
+     * 直连 Spring Environment 判定：与 PdfBoxParserEnabled 的注册条件保持一致。
+     */
+    @Override
+    public boolean routeable() {
+        String mode = environment.getProperty("rag.ingestion.pdf-parser", "pdfbox");
+        return !"auto".equals(mode);
+    }
+
+    private final org.springframework.core.env.Environment environment;
+
+    public PdfBoxParser(org.springframework.core.env.Environment environment) {
+        this.environment = environment;
     }
 
     @Override

@@ -60,4 +60,17 @@ public interface DocumentRepository extends JpaRepository<DocumentEntity, String
                            com.rag.domain.enums.DocumentStatus status,
                            com.rag.domain.enums.PipelineStage stage,
                            @org.springframework.data.repository.query.Param("chunkCount") int chunkCount);
+
+    /**
+     * 定向写入解析路由元数据（R6-D）：与 {@link #updateStatusFields} 同理，
+     * 避免全字段 merge 把 worker 快照里的旧 active 位写回撞唯一键。
+     * 仅 AUTO 解析路径调用；手动模式传 null 不调用、不清除历史值。
+     */
+    @org.springframework.transaction.annotation.Transactional
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @org.springframework.data.jpa.repository.Query(
+            "update DocumentEntity d set d.parseMetadata = :parseMetadata where d.id = :id")
+    int updateParseMetadata(@org.springframework.data.repository.query.Param("id") String id,
+                            @org.springframework.data.repository.query.Param("parseMetadata")
+                            java.util.Map<String, Object> parseMetadata);
 }
