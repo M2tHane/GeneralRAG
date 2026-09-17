@@ -192,6 +192,7 @@ class DatasetFileParserTest {
                 [
                   {"question":"那对因此分配失败的分片，还要做什么？","category":"FOLLOW_UP",
                    "answerable":true,
+                   "evidence":[{"docName":"es.md","contentHash":"abc123"}],
                    "history":[
                      {"role":"user","content":"ES 磁盘洪泛水位是多少？"},
                      {"role":"assistant","content":"97% 触发只读块。"}
@@ -207,7 +208,8 @@ class DatasetFileParserTest {
     @Test
     void historyMissingDefaultsToEmpty() {
         String json = """
-                [{"question":"q","category":"DIRECT"}]""";
+                [{"question":"q","category":"DIRECT",
+                  "evidence":[{"docName":"a.md","contentHash":"h1"}]}]""";
         List<DatasetFileParser.EvalItem> items = parser.parse("ds.json", bytes(json));
         assertThat(items.get(0).history()).isEmpty();
     }
@@ -276,13 +278,14 @@ class DatasetFileParserTest {
     @Test
     void csvParsesHardEvalColumns() {
         String csv = """
-                question,answerable,category,evidenceMode,failureMode,temptingEvidence,missingRequirement
-                "默认端口是多少？",true,DIRECT,SINGLE_CHUNK,,"[]",""
-                "最大并发是多少？",false,CONFUSABLE,,PARTIAL_EVIDENCE,"[{""contentHash"":""abc123""}]","缺 worker_processes"
+                question,answerable,category,evidenceMode,failureMode,evidence,temptingEvidence,missingRequirement
+                "默认端口是多少？",true,DIRECT,SINGLE_CHUNK,,"[{""contentHash"":""h1""}]","[]",""
+                "最大并发是多少？",false,CONFUSABLE,,PARTIAL_EVIDENCE,"[]","[{""contentHash"":""abc123""}]","缺 worker_processes"
                 """;
         List<DatasetFileParser.EvalItem> items = parser.parse("hard.csv", bytes(csv));
         assertThat(items).hasSize(2);
         assertThat(items.get(0).evidenceMode()).isEqualTo(com.rag.domain.enums.EvalEvidenceMode.SINGLE_CHUNK);
+        assertThat(items.get(0).evidence()).hasSize(1);
         assertThat(items.get(0).failureMode()).isNull();
         assertThat(items.get(1).failureMode()).isEqualTo(com.rag.domain.enums.EvalFailureMode.PARTIAL_EVIDENCE);
         assertThat(items.get(1).temptingEvidence()).hasSize(1);
@@ -368,5 +371,111 @@ class DatasetFileParserTest {
                     assertThat(e.getCode()).isEqualTo(ErrorCode.INVALID_DATASET_FILE);
                     assertThat(e.getMessage()).contains("evidenceMode");
                 });
+    }
+
+    // ---------- R6-A.1：校验补齐 ----------
+
+    @Test
+    void positiveWithoutEvidenceRejected() {
+        String json = """
+                [{"question":"q","category":"DIRECT","answerable":true}]""";
+        assertThatThrownBy(() -> parser.parse("ds.json", bytes(json)))
+                .isInstanceOfSatisfying(DomainException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(ErrorCode.INVALID_DATASET_FILE);
+                    assertThat(e.getMessage()).contains("evidence 必填");
+                });
+    }
+
+    @Test
+    void positiveEvidenceWithoutAnchorRejected() {
+        String json = """
+                [{"question":"q","category":"DIRECT","answerable":true,
+                  "evidence":[{"docName":"a.md"},{"contentHash":"abc123"}]}]""";
+        assertThatThrownBy(() -> parser.parse("ds.json", bytes(json)))
+                .isInstanceOfSatisfying(DomainException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(ErrorCode.INVALID_DATASET_FILE);
+                    assertThat(e.getMessage()).contains("evidence[0] 缺少分块级锚点");
+                });
+    }
+
+    @Test
+    void multiChunkWithOneEvidenceRejected() {
+        String json = """
+                [{"question":"q","category":"DIRECT","answerable":true,"evidenceMode":"MULTI_CHUNK",
+                  "evidence":[{"contentHash":"abc123"}]}]""";
+        assertThatThrownBy(() -> parser.parse("ds.json", bytes(json)))
+                .isInstanceOfSatisfying(DomainException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(ErrorCode.INVALID_DATASET_FILE);
+                    assertThat(e.getMessage()).contains("MULTI_CHUNK");
+                });
+    }
+
+    @Test
+    void followUpWithoutHistoryRejected() {
+        String json = """
+                [{"question":"那这个呢？","category":"FOLLOW_UP","answerable":true,
+                  "evidenceMode":"FOLLOW_UP",
+                  "evidence":[{"contentHash":"abc123"}]}]""";
+        assertThatThrownBy(() -> parser.parse("ds.json", bytes(json)))
+                .isInstanceOfSatisfying(DomainException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(ErrorCode.INVALID_DATASET_FILE);
+                    assertThat(e.getMessage()).contains("FOLLOW_UP");
+                });
+    }
+
+    @Test
+    void temptingEvidenceWithOneInvalidEntryRejected() {
+        // 两条 temptingEvidence：第一条合法带锚点，第二条无锚点 → allMatch 必须整体拒绝
+        String json = """
+                [{"question":"q","category":"CONFUSABLE","answerable":false,
+                  "failureMode":"ENTITY_MISMATCH",
+                  "temptingEvidence":[
+                    {"docName":"a.md","contentHash":"abc123"},
+                    {"docName":"b.md"}
+                  ]}]""";
+        assertThatThrownBy(() -> parser.parse("ds.json", bytes(json)))
+                .isInstanceOfSatisfying(DomainException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(ErrorCode.INVALID_DATASET_FILE);
+                    assertThat(e.getMessage()).contains("temptingEvidence 每条都必须含分块级锚点");
+                });
+    }
+
+    @Test
+    void negativeWithFailureModeAccepted() {
+        String json = """
+                [{"question":"KB 完全没有的话题？","category":"OUT_OF_KB","answerable":false,
+                  "failureMode":"OUT_OF_KB","missingRequirement":"超纲"}]""";
+        List<DatasetFileParser.EvalItem> items = parser.parse("ds.json", bytes(json));
+        assertThat(items).hasSize(1);
+        assertThat(items.get(0).failureMode()).isEqualTo(com.rag.domain.enums.EvalFailureMode.OUT_OF_KB);
+        assertThat(items.get(0).evidenceMode()).isNull();
+    }
+
+    @Test
+    void positiveYesNoWithEvidenceAccepted() {
+        // yes/no 修正型问题（"X 默认是 Y 吗？"而 KB 明确 X!=Y）按 R6-A.1 §1/§3 是正例：
+        // 系统可以回答"不是，正确值是 Z"，只要 evidence 指向给出正确值的 chunk
+        String json = """
+                [{"question":"proxy_buffering 默认是 off 吗？","category":"DIRECT","answerable":true,
+                  "evidenceMode":"SINGLE_CHUNK",
+                  "evidence":[{"docName":"nginx.md","chunkId":"c1","contentHash":"abc123"}],
+                  "referenceAnswer":"不是，默认是 on。"}]""";
+        List<DatasetFileParser.EvalItem> items = parser.parse("ds.json", bytes(json));
+        assertThat(items).hasSize(1);
+        assertThat(items.get(0).answerable()).isTrue();
+        assertThat(items.get(0).failureMode()).isNull();
+        assertThat(items.get(0).referenceAnswer()).contains("不是，默认是 on");
+    }
+
+    @Test
+    void singleChunkWithMultipleEquivalentEvidenceAccepted() {
+        // SINGLE_CHUNK 不强制恰好 1 条：允许多条等价证据（R6-A.1 §9）
+        String json = """
+                [{"question":"q","category":"TERM_VARIATION","answerable":true,
+                  "evidenceMode":"SINGLE_CHUNK",
+                  "evidence":[{"contentHash":"h1"},{"chunkId":"c2"}]}]""";
+        List<DatasetFileParser.EvalItem> items = parser.parse("ds.json", bytes(json));
+        assertThat(items).hasSize(1);
+        assertThat(items.get(0).evidence()).hasSize(2);
     }
 }

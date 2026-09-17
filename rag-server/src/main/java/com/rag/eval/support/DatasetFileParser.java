@@ -302,8 +302,8 @@ public class DatasetFileParser {
         String missingRequirement = rawMissing == null || String.valueOf(rawMissing).isBlank()
                 ? null : String.valueOf(rawMissing);
 
-        // 一致性校验（R6-A §12）：answerable 与 failureMode/evidenceMode 不允许矛盾状态。
-        // 只允许双 null 或一一对应，错误样本直接拒绝导入，不静默修正标签。
+        // 一致性校验（R6-A §12 + R6-A.1 §9/§10 补齐）：错误样本直接拒绝导入，
+        // 不静默修正标签。answerable 与 failureMode/evidenceMode 不允许矛盾状态。
         if (answerable && failureMode != null) {
             throw invalid(location + "：answerable=true 时不得设置 failureMode（当前："
                     + failureMode + "）");
@@ -317,8 +317,10 @@ public class DatasetFileParser {
                     + "（OUT_OF_KB/PARTIAL_EVIDENCE/MISSING_CONDITION/ENTITY_MISMATCH/SCOPE_MISMATCH/"
                     + "NUMERIC_MISMATCH/VERSION_CONFLICT/UNSUPPORTED_INFERENCE）");
         }
+        // R6-A.1 §10：temptingEvidence 每一条都必须有分块级锚点（此前误用 anyMatch，
+        // 一条合法会掩盖其余无锚点的条目）
         if (!answerable && temptingEvidence != null && !temptingEvidence.isEmpty()
-                && !hasAnyAnchor(temptingEvidence)) {
+                && !allEntriesAnchored(temptingEvidence)) {
             throw invalid(location + "：temptingEvidence 每条都必须含分块级锚点"
                     + "（contentHash/chunkId/titlePath/anchorPath 之一）");
         }
@@ -326,17 +328,42 @@ public class DatasetFileParser {
                 || missingRequirement != null)) {
             throw invalid(location + "：temptingEvidence/missingRequirement 仅用于 answerable=false 的负例");
         }
+        // R6-A.1 §9：正例必须有证据，且每条 required evidence 都要有分块级锚点——
+        // 缺锚点的证据在 Hit/Coverage 判定中恒为未命中，只会污染指标而不报错
+        if (answerable) {
+            if (evidence.isEmpty()) {
+                throw invalid(location + "：answerable=true 时 evidence 必填（至少 1 条）");
+            }
+            for (int i = 0; i < evidence.size(); i++) {
+                Map<String, Object> ev = evidence.get(i);
+                if (!hasChunkAnchor(ev)) {
+                    throw invalid(location + "：evidence[" + i
+                            + "] 缺少分块级锚点（contentHash/chunkId/titlePath/anchorPath 之一）");
+                }
+            }
+            // evidenceMode 合理约束（允许多块等价证据，故 SINGLE_CHUNK 只要求非空）
+            if (evidenceMode == EvalEvidenceMode.MULTI_CHUNK && evidence.size() < 2) {
+                throw invalid(location + "：evidenceMode=MULTI_CHUNK 时 evidence 至少 2 条（当前 "
+                        + evidence.size() + " 条）");
+            }
+            if (evidenceMode == EvalEvidenceMode.FOLLOW_UP && history.isEmpty()) {
+                throw invalid(location + "：evidenceMode=FOLLOW_UP 时 history 必填（指代解析依赖会话历史）");
+            }
+        }
 
         return new EvalItem(q.trim(), referenceAnswer, evidence, history, answerable, category,
                 failureMode, evidenceMode, temptingEvidence, missingRequirement);
     }
 
-    /** 是否存在至少一条带分块级锚点的证据（R6-A temptingEvidence 校验用）。 */
-    private static boolean hasAnyAnchor(List<Map<String, Object>> evidenceList) {
-        return evidenceList.stream().anyMatch(ev -> ev.get("contentHash") != null
-                || ev.get("chunkId") != null
-                || ev.get("titlePath") != null
-                || ev.get("anchorPath") != null);
+    /** 单条证据是否带分块级锚点（contentHash/chunkId/titlePath/anchorPath 之一）。 */
+    private static boolean hasChunkAnchor(Map<String, Object> ev) {
+        return ev.get("contentHash") != null || ev.get("chunkId") != null
+                || ev.get("titlePath") != null || ev.get("anchorPath") != null;
+    }
+
+    /** 全部条目都带分块级锚点（R6-A.1 §10：allMatch 语义，与 EvidenceMatcher.hasChunkLevelAnchor 对齐）。 */
+    private static boolean allEntriesAnchored(List<Map<String, Object>> evidenceList) {
+        return evidenceList.stream().allMatch(DatasetFileParser::hasChunkAnchor);
     }
 
     /** evidence 解析（与旧实现一致，抽出便于 history 复用数组校验路径）。 */
