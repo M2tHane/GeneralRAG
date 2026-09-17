@@ -67,7 +67,8 @@ class IngestionTaskManagerTest {
         ParserRouter parserRouter = new ParserRouter(List.of(
                 new com.rag.ingestion.parse.TextParser(),
                 new com.rag.ingestion.parse.MarkdownParser(),
-                new com.rag.ingestion.parse.PdfBoxParser()));
+                new com.rag.ingestion.parse.PdfBoxParser(
+                        new org.springframework.mock.env.MockEnvironment())));
 
         manager = new IngestionTaskManager(taskRepository, documentRepository, objectStore,
                 esChunkIndex, parserRouter,

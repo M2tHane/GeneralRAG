@@ -189,7 +189,7 @@ class DocumentControllerTest {
                         LocalDateTime.now(), LocalDateTime.now(),
                         new com.rag.api.dto.ChunkingConfig(
                                 com.rag.domain.enums.ChunkStrategy.STRUCTURE, 800, 100),
-                        "a".repeat(64), null, null, task()));
+                        "a".repeat(64), null, null, null, task()));
 
         mockMvc.perform(get("/api/v1/documents/" + DOC))
                 .andExpect(status().isOk())
