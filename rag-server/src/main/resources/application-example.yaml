@@ -1,6 +1,8 @@
 # =====================================================================
 # 本地启动示例 —— 复制为 application.yaml 或以环境变量提供同名值后再启动。
 # 启动前先在仓库根目录执行 `docker compose up -d` 拉起 MySQL / Elasticsearch / MinIO。
+# 数值与 application.yaml 默认值保持一致（R4.1 阈值重校准、R6-C query-rewrite、
+# R6-D PDF AUTO 路由均已同步）；环境变量注入密钥，勿写明文。
 # 注意：不要把真实密钥提交进仓库。
 # =====================================================================
 server:
@@ -77,7 +79,7 @@ rag:
     top-k: 6                    # 召回块数，≥1
     min-score: 0.30             # 阈值，[0,1]；作用于最终排序分，低于阈值的块不进入回答与引用
     max-context-chars: 6000     # 拼接给模型的上下文总长上限
-    # 检索模式（第二轮）：VECTOR=仅向量（第一轮基线）| HYBRID=BM25+向量 RRF 融合 | HYBRID_RERANK=融合+重排
+    # 检索模式：VECTOR=仅向量（第一轮基线）| HYBRID=BM25+向量 RRF 融合 | HYBRID_RERANK=融合+重排
     # 注意：三种模式的 score 语义不同（余弦/余弦/重排相关度），切换模式后需重新校准 min-score 与拒答阈值
     mode: HYBRID_RERANK
     rrf:
@@ -96,11 +98,44 @@ rag:
       enabled: true
       # 双阈值口径：重排生效时用 rerank-threshold（默认模式）；降级/未启用重排时用 cosine-threshold。
       # 余弦口径区分度弱（实测资料外题与可答题区间重叠），只能过滤明显不相关。
-      rerank-threshold: 0.65
+      # 0.75 为 R4.1 对 qwen3.7-text-rerank 的重校准值（依据 docs/round4/04-R4.1评测与校准.md §B）；
+      # ⚠ 更换 rerank 模型或语料分布后必须重新校准。
+      rerank-threshold: 0.75
       cosine-threshold: 0.30
+    answerability:
+      # R4：证据充分性判定（低分直拒 → 其余交给 Judge）
+      enabled: true
+      # Judge 失败降级：false=退回旧阈值行为放行（标注 JUDGE_DEGRADED）；true=保守拒答
+      fail-closed: false
+      # Judge 超时（秒）：同时是 Judge HTTP connect/read timeout（R4.1 单一超时语义）
+      judge-timeout-seconds: 15
+      # R4.1 bulkhead：同时进入 Judge 调用的判定数上限；耗尽按 OVERLOADED 快速降级
+      max-concurrent-judges: 4
+      # 获取 Judge 名额的最长等待（毫秒）
+      bulkhead-wait-ms: 500
+    query-rewrite:
+      # R6-C：history-aware query rewrite（仅改写检索查询；Judge/生成仍用原始问题；失败回退原查询）
+      enabled: true
+      timeout-seconds: 5        # rewrite 模型 HTTP connect/read timeout（秒）
+      max-query-length: 200     # 改写查询最大长度（字符），超长视为非法输出并回退
+      max-history-turns: 4      # 提示词携带的最大历史条数（沿用项目 history window 收敛约定）
   ingestion:
     worker-threads: 2           # 入库流水线固定线程池大小
     max-upload-size-mb: 50
+    # PDF 解析器：pdfbox（默认，文本层）| mineru（远端 mineru-api，复杂版面/扫描件 OCR）| auto（R6-D 质量探针路由）
+    pdf-parser: pdfbox
+    mineru-base-url:            # 使用 mineru/auto 解析器时必填
+    mineru-timeout-seconds: 600 # 扫描件 OCR 较慢，超时按分钟级给
+    # R6-D：PDF AUTO 路由（仅 pdf-parser=auto 生效）。规则顺序固定：
+    # 探针失败 → LOW_TEXT_DENSITY → TOO_MANY_EMPTY_TEXT_PAGES → LOW_TEXT_QUALITY
+    # → GARBLED_TEXT → 其余 TEXT_PDF
+    pdf-auto:
+      min-chars: 100                # 全文有效字符（去空白）总数下限
+      min-chars-per-page: 30        # 单页平均有效字符数下限
+      max-empty-page-ratio: 0.8     # 空文本页占比上限，[0,1]
+      empty-page-char-threshold: 20 # 单页判空的有效字符阈值
+      min-printable-ratio: 0.90     # 可打印字符占比下限，[0,1]
+      max-replacement-char-ratio: 0.05  # U+FFFD 替换字符占比上限，[0,1]
   elasticsearch:
     content-analyzer: ik_max_word   # docker-compose 中的 ES 镜像已含 IK 插件；换官方镜像时改 standard
 

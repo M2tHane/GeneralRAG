@@ -13,3 +13,6 @@ target/
 
 # 本地运行时输出（mineru 客户端 OCR 输出等）
 output/
+
+# 工作流运行态（.supie/state/README.md：只提交 README 与 archive，不提交 current.yaml）
+.supie/state/current.yaml

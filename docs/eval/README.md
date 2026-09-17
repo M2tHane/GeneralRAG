@@ -4,7 +4,7 @@
 
 | 版本 | 文件 | 锚定方式 | 状态 |
 | --- | --- | --- | --- |
-| v1 | `eval-tuning-v1.json` / `eval-test-v1.json`（含 `-array` 契约格式） | `docName` + 手写 titlePath | **已退役**：第一轮命中判定实际退化为文档级（evidence titlePath 从未匹配真实分块路径，命中全靠 docName 相等），Hit@K=1.00 是饱和的假满分 |
+| v1 | `eval-tuning-v1-array.json` / `eval-test-v1-array.json`（`-array` 契约格式；dict 包裹版 `eval-tuning-v1.json`/`eval-test-v1.json` 已删除——导入端仅接受对象数组，dict 版本不可导入且内容与 array 版完全重复） | `docName` + 手写 titlePath | **已退役**：第一轮命中判定实际退化为文档级（evidence titlePath 从未匹配真实分块路径，命中全靠 docName 相等），Hit@K=1.00 是饱和的假满分。array 版仅作历史存档保留 |
 | **v2** | `eval-tuning-v2-array.json` / `eval-test-v2-array.json` | **真实 chunkId + 分块级 titlePath**（按分块器实际输出生成） | **当前版本**：第二轮分块级判定使用，evidence 逐条锚定真实 chunkId |
 
 第二轮起命中判定按 `chunkId` / `titlePath` / `anchorPath` 精确匹配，**不再回退到 docName**——证据缺分块级锚点的题会如实判为未命中（体现"数据集锚点不足"），而不是给出文档级虚高满分。因此 **v1 数据集不可再用于第二轮口径的评测**。
@@ -42,7 +42,7 @@
 | docs/eval/eval-tuning-v2-array.json | TUNING（调优集） | 6 | DIRECT、TERM_VARIATION、CONFUSABLE、OUT_OF_KB（不可答） |
 | docs/eval/eval-test-v2-array.json | TEST（独立测试集） | 10 | DIRECT、TERM_VARIATION、CONFUSABLE、FOLLOW_UP、OUT_OF_KB |
 
-（v1 文件头的类别统计与实际内容有出入，以 v2 文件实际内容为准。）
+（v1 数据集已退役且不可再导入有效评测；统计口径以 v2 文件实际内容为准。）
 
 - 字段与 `contracts/openapi.yaml` 的 EvalDatasetItem / EvidenceRef 对齐；v2 的 `evidence.chunkId` / `evidence.titlePath` 来自真实分块器输出。
 - FOLLOW_UP 题（"那磁盘清理完之后……"）检索仅对当前问题向量化，预期表现较差，属已知局限（第二轮未做查询改写，理由见需求文档 §4）。

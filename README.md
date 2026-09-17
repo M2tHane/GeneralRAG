@@ -10,6 +10,8 @@
 - 第二轮实施记录：`docs/round2/02-实施记录.md`
 - 第三轮（格式扩展/Excel 分块/文档多版本）：`docs/round3/01-实施记录-P1.md` ~ `04-实施记录-R4Excel.md`
 - 第四轮（Answerability）：`docs/round4/01-Baseline分析.md`、`docs/round4/02-实施记录.md`
+- 第五轮（检索质量/Excel 分块）：`docs/round5/01-Round5实施记录.md`
+- 项目范围冻结：`docs/FEATURE-FREEZE.md`（Current Scope / Completed / Known Limitations / Future Work）
 
 ## 环境要求
 
@@ -43,7 +45,8 @@ export CHAT_MODEL_NAME=your-chat-model
 export EMBEDDING_BASE_URL=http://your-embed-endpoint/v1
 export EMBEDDING_API_KEY=...
 export EMBEDDING_MODEL_NAME=your-embedding-model
-export EMBEDDING_DIMENSIONS=1024                           # 必须与模型实际输出一致，否则启动失败
+# 维度：application.yaml 的 rag.models.embedding.dimensions 固定为 1024，
+# embedding 模型实际输出必须一致，否则启动探活失败（如需改维度直接改该配置项）
 
 # 重排服务（可选；不配置则重排相关能力自动降级为融合顺序，问答仍可用）
 export RERANK_MODEL_BASE_URL=https://dashscope.aliyuncs.com  # 原生端点，非 OpenAI 兼容路径
@@ -52,7 +55,7 @@ export RERANK_MODEL_NAME=qwen3.7-text-rerank
 
 # 检索模式与拒答阈值（可选覆盖）
 export RAG_RETRIEVAL_MODE=HYBRID_RERANK   # VECTOR | HYBRID | HYBRID_RERANK
-export RAG_REFUSAL_RERANK_THRESHOLD=0.65  # 重排口径阈值（默认 0.65）；切模式需重校准
+export RAG_REFUSAL_RERANK_THRESHOLD=0.75  # 重排口径阈值（默认 0.75，R4.1 重校准值）；切模式/模型需重校准
 export RAG_REFUSAL_COSINE_THRESHOLD=0.30  # 余弦口径阈值（默认 0.30，重排降级时生效）
 # Answerability 证据充分性判定（默认开启；低分直拒，其余交给 LLM Judge）
 export RAG_ANSWERABILITY_ENABLED=true
@@ -118,10 +121,11 @@ pnpm build && pnpm start   # http://localhost:3000（/api 由 Next.js rewrites �
 
 1. 建知识库并上传 `docs/eval-corpus/` 下的语料（来源与说明见 `docs/eval/README.md`）；
 2. 导入数据集：`POST /api/v1/eval/datasets`（multipart：file / name / datasetType）——
-   - 第一轮格式：`docs/eval/eval-tuning-v1.json`（TUNING）/ `eval-test-v1.json`（TEST），evidence 用 docName 锚定（**已退役**）；
    - 第二轮格式：`docs/eval/eval-tuning-v2-array.json` / `eval-test-v2-array.json`，evidence 用**真实 chunkId + 分块级 titlePath** 锚定；
+   - R3 格式扩展专项：`docs/eval/eval-formats-r3-v1-array.json`（docx/xlsx/csv 语料，contentHash 锚点）；
    - 第四轮 Answerability 专项集：`docs/eval/eval-answerability-v1-array.json`（72 题，contentHash 锚点，CONFUSABLE/PARTIAL_EVIDENCE/OUT_OF_KB 占 2/3）；
    - R4.1 修订版：`docs/eval/eval-answerability-v2-array.json`（3 处标签按标注指南修订 + 6 道 FOLLOW_UP 补 history）；
+   - R6-A Hard Eval：`docs/eval/eval-v3-hard-v2-array.json`（80 题，7 类 failureMode 标签）；
    - 调优集与独立测试集严格分离，测试集不参与调参；
 3. 发起运行：`POST /api/v1/eval/runs`（datasetId / kbId / 可选 topK、minScore）；
 4. 查看结果：`GET /api/v1/eval/runs/{runId}`（Hit@1/3/5、Recall@5、MRR、拒答正确率、**Answerability 混淆矩阵（TP/FP/FN/TN、False Answer Rate、False Refusal Rate、Judge 调用率/降级率/耗时）、耗时拆分与 p50/p95/max、逐题回答与来源与判定记录**），`PATCH .../items/{itemId}` 人工标注；
@@ -130,7 +134,7 @@ pnpm build && pnpm start   # http://localhost:3000（/api 由 Next.js rewrites �
 ## 5. 测试
 
 ```bash
-cd rag-server && mvn test        # 207 个测试（集成测试直连开发 Docker 的 MySQL/ES/MinIO）
+cd rag-server && mvn test        # 43 个测试类（含集成测试，直连开发 Docker 的 MySQL/ES/MinIO）
 cd rag-web    && pnpm test       # vitest；pnpm e2e 需前后端同时在线
 ```
 
@@ -176,8 +180,8 @@ cd rag-web    && pnpm test       # vitest；pnpm e2e 需前后端同时在线
 | --- | --- |
 | 后端 | `rag-server/`（Maven 单模块，包边界见技术路线 §2；`com.rag.answerability` 为 R4 新增包） |
 | 前端 | `rag-web/`（Next.js App Router） |
-| 数据库迁移 | `rag-server/src/main/resources/db/migration/V1__init.sql`（11 表）、`V2__round2_retrieval_eval.sql`（耗时拆分两列）、`V3__document_versions.sql`（文档多版本）、`V4__answerability_eval.sql`（PARTIAL_EVIDENCE + 逐题决策列） |
+| 数据库迁移 | `rag-server/src/main/resources/db/migration/`（V1 初始化 11 表 → V8 parse_metadata，共 8 个，Flyway 管理） |
 | 中间件编排 | `docker-compose.yml` |
 | 评测材料 | `docs/eval-corpus/`、`docs/eval/`（answerability-v1 生成器：`scripts/gen-answerability-dataset.py`） |
-| 轮次记录 | `docs/round2/`、`docs/round3/`、`docs/round4/` |
-| 工作流状态 | `.supie/state/current.yaml`（运行态，不入库） |
+| 轮次记录 | `docs/round2/` ~ `docs/round5/`（第五轮检索质量/Excel 分块；R6 系列见 git log 与评测页） |
+| 工作流状态 | `.supie/state/`（README 与 archive 入库；current.yaml 为本地运行态，不入库） |
