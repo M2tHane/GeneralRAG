@@ -1,0 +1,111 @@
+[
+  {
+    "id": "demo-01",
+    "category": "DIRECT",
+    "question": "Aurora Cloud 当前稳定版本是什么？",
+    "expectedBehavior": "ANSWER",
+    "expectedAnswerContains": ["3.2"],
+    "evidence": ["product-guide.md"],
+    "demoPurpose": "单文档直接问答"
+  },
+  {
+    "id": "demo-02",
+    "category": "DIRECT",
+    "question": "Aurora Cloud 主要部署在哪些区域？",
+    "expectedBehavior": "ANSWER",
+    "expectedAnswerContains": ["cn-north-1", "cn-east-2", "ap-southeast-1"],
+    "evidence": ["product-guide.md"],
+    "demoPurpose": "多事实列举"
+  },
+  {
+    "id": "demo-03",
+    "category": "HYBRID",
+    "question": "Aurora 最多允许丢失多长时间的数据？",
+    "expectedBehavior": "ANSWER",
+    "expectedAnswerContains": ["15 分钟"],
+    "evidence": ["operations-guide.pdf"],
+    "demoPurpose": "问题不复述原文，需混合检索（RPO=15 分钟）；可配合 /debug/retrieval 观察 vector/bm25/fused/reranked 候选"
+  },
+  {
+    "id": "demo-04",
+    "category": "MULTI_CHUNK",
+    "question": "Aurora 的默认维护窗口是什么时候？普通生产变更需要谁批准？",
+    "expectedBehavior": "ANSWER",
+    "expectedAnswerContains": ["每周三 02:00-04:00", "服务负责人"],
+    "evidence": ["operations-guide.pdf", "change-policy.docx"],
+    "demoPurpose": "跨文档多事实组合（PDF + DOCX）"
+  },
+  {
+    "id": "demo-05",
+    "category": "FOLLOW_UP",
+    "question": "Aurora 数据库连接池的 idleTimeout 和 cachePrepStmts 默认配置分别是什么？",
+    "expectedBehavior": "ANSWER",
+    "expectedAnswerContains": ["600000", "true"],
+    "evidence": ["database-guide.md"],
+    "demoPurpose": "Follow-up 会话的 Q1（建立上下文，不计入 Golden 结果）"
+  },
+  {
+    "id": "demo-06",
+    "category": "FOLLOW_UP",
+    "question": "前者是多少？",
+    "expectedBehavior": "ANSWER",
+    "expectedAnswerContains": ["600000"],
+    "evidence": ["database-guide.md"],
+    "historyFrom": "demo-05",
+    "demoPurpose": "Follow-up 指代解析：'前者' → idleTimeout；debug 应看到 queryRewritten=true 且 retrievalQuery 含 idleTimeout"
+  },
+  {
+    "id": "demo-07",
+    "category": "FOLLOW_UP",
+    "question": "后者默认开启吗？",
+    "expectedBehavior": "ANSWER",
+    "expectedAnswerContains": ["开启"],
+    "evidence": ["database-guide.md"],
+    "historyFrom": "demo-05",
+    "demoPurpose": "Follow-up 指代解析：'后者' → cachePrepStmts（默认开启）"
+  },
+  {
+    "id": "demo-08",
+    "category": "CORRECTIVE",
+    "question": "Aurora 的 RPO 是 1 小时吗？",
+    "expectedBehavior": "ANSWER",
+    "expectedAnswerContains": ["15 分钟"],
+    "evidence": ["operations-guide.pdf"],
+    "demoPurpose": "证据明确反驳用户前提，不能因问法像 yes/no 就拒答"
+  },
+  {
+    "id": "demo-09",
+    "category": "OUT_OF_KB",
+    "question": "Aurora Cloud 的 CEO 是谁？",
+    "expectedBehavior": "REFUSE",
+    "evidence": [],
+    "demoPurpose": "资料外问题拒答：所有 Demo 文档中不出现 CEO；citations 应为空数组"
+  },
+  {
+    "id": "demo-10",
+    "category": "SPREADSHEET",
+    "question": "cn-east-2 的容量是多少？",
+    "expectedBehavior": "ANSWER",
+    "expectedAnswerContains": ["800"],
+    "evidence": ["regional-capacity.xlsx"],
+    "demoPurpose": "表格行值检索"
+  },
+  {
+    "id": "demo-11",
+    "category": "SPREADSHEET",
+    "question": "哪个区域的容量是 1200？",
+    "expectedBehavior": "ANSWER",
+    "expectedAnswerContains": ["cn-north-1"],
+    "evidence": ["regional-capacity.xlsx"],
+    "demoPurpose": "表格反向检索（由值找行）"
+  },
+  {
+    "id": "demo-12",
+    "category": "DIRECT",
+    "question": "跨区域健康检查是在哪个版本默认启用的？",
+    "expectedBehavior": "ANSWER",
+    "expectedAnswerContains": ["3.2"],
+    "evidence": ["release-notes.md"],
+    "demoPurpose": "版本/实体区分（3.1 与 3.2 功能归属）"
+  }
+]

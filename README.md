@@ -84,6 +84,14 @@ curl -N -X POST http://localhost:8080/api/v1/qa/stream -H 'Content-Type: applica
 
 默认 `pdf-parser=pdfbox`，**最小启动不需要 MinerU**，普通文本 PDF 直接入库。
 
+## Demo
+
+仓库提供一套独立于 Eval Dataset 的 Golden Demo（`demo/`，Aurora Cloud 主题，6 份短文档 + 12 个演示问题），
+覆盖 Direct QA、Hybrid Retrieval、Multi-source 组合、Follow-up Query Rewrite、Corrective 纠错、
+Out-of-KB Refusal 和 Excel 表格检索，10~15 分钟可完整演示。
+
+详见 `demo/README.md`（验证记录见 `demo/VALIDATION.md`）。
+
 ## Troubleshooting（本轮实际启动验证遇到的问题）
 
 - **后端启动失败 `Access denied for user 'rag' ... (using password: NO)`**：`MYSQL_PASSWORD` 未生效——application.yaml 默认密码为空。确认根目录已 `cp .env.example .env`，并按上方 `set -a && source ../.env && set +a` 方式加载（compose 内 MySQL 密码固定 `rag-pass`）。
