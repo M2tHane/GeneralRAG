@@ -59,6 +59,13 @@ public class FakeOpenAiServer {
     private volatile long nonStreamDelayMs = 0;
     /** 非流式请求失败（500）：模拟 Judge 模型不可用。 */
     private final AtomicBoolean nonStreamFailure = new AtomicBoolean(false);
+    /** R6-B.1：前 N 次非流式请求按 nonStreamAnswers 顺序返回，之后 500（0 = 关闭）。 */
+    private final java.util.concurrent.atomic.AtomicInteger nonStreamFailAfter =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+    /** R6-B.1：顺序非流式响应（每次非流式请求依次取一条；取尽后回退 nonStreamAnswer/chatAnswer）。 */
+    private volatile java.util.List<String> nonStreamAnswers;
+    private final java.util.concurrent.atomic.AtomicInteger nonStreamAnswerCursor =
+            new java.util.concurrent.atomic.AtomicInteger(0);
     /** 已收到的非流式请求计数（断言"Judge 被调/未被调"）。 */
     private final java.util.concurrent.atomic.AtomicInteger nonStreamCount =
             new java.util.concurrent.atomic.AtomicInteger();
@@ -144,6 +151,12 @@ public class FakeOpenAiServer {
             int active = nonStreamActive.incrementAndGet();
             nonStreamActiveMax.accumulateAndGet(active, Math::max);
             try {
+                // R6-B.1：前 N 次放行、之后 500（计数已在上方统一自增，此处仅判定）
+                if (nonStreamFailAfter.get() > 0
+                        && nonStreamCount.get() > nonStreamFailAfter.get()) {
+                    respond(exchange, 500, Map.of("error", Map.of("message", "judge failure after N (test)")));
+                    return;
+                }
                 if (nonStreamFailure.get()) {
                     respond(exchange, 500, Map.of("error", Map.of("message", "judge failure (test)")));
                     return;
@@ -151,7 +164,11 @@ public class FakeOpenAiServer {
                 if (nonStreamDelayMs > 0) {
                     Thread.sleep(nonStreamDelayMs);
                 }
-                String answer = nonStreamAnswer != null ? nonStreamAnswer : chatAnswer;
+                // R6-B.1：顺序响应优先（每次非流式请求消费一条；未设置或已取尽回退单值）
+                String answer = takeSequencedNonStreamAnswer();
+                if (answer == null) {
+                    answer = nonStreamAnswer != null ? nonStreamAnswer : chatAnswer;
+                }
                 respond(exchange, 200, Map.of(
                         "id", "chatcmpl-fake", "object", "chat.completion",
                         "choices", List.of(Map.of(
@@ -251,6 +268,30 @@ public class FakeOpenAiServer {
 
     public void setNonStreamFailure(boolean fail) {
         this.nonStreamFailure.set(fail);
+    }
+
+    /** R6-B.1：按请求次序的非流式响应（Judge 决策逐题不同）；传 null 清除。 */
+    public void setNonStreamAnswers(java.util.List<String> answers) {
+        this.nonStreamAnswers = answers;
+        this.nonStreamAnswerCursor.set(0);
+    }
+
+    /** R6-B.1：前 N 次非流式请求正常，之后 500（0 = 关闭，等效 setNonStreamFailure(false)）。 */
+    public void setNonStreamFailureAfter(int n) {
+        this.nonStreamFailAfter.set(n);
+        if (n <= 0) {
+            this.nonStreamFailure.set(false);
+        }
+    }
+
+    /** 消费一条顺序非流式响应；未设置或已取尽返回 null（回退单值响应）。 */
+    private String takeSequencedNonStreamAnswer() {
+        java.util.List<String> seq = this.nonStreamAnswers;
+        if (seq == null || seq.isEmpty()) {
+            return null;
+        }
+        int idx = nonStreamAnswerCursor.getAndIncrement();
+        return idx < seq.size() ? seq.get(idx) : null;
     }
 
     public int nonStreamRequestCount() {

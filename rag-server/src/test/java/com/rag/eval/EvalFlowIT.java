@@ -504,6 +504,93 @@ class EvalFlowIT {
         }
     }
 
+    /**
+     * R6-B.1：Eval denominator invariant——attempted ≥ executed ≥ evaluated，
+     * 且 evaluatedCount = TP+FP+FN+TN（degraded 系统故障不进四格），
+     * judgeInvokedCount/judgeDegradedCount 只在 answerability 明细（degraded 字段）
+     * 与 confusion.judgeDegradedRate 体现，绝不把 degraded 记成 TP/TN。
+     *
+     * <p>构造 3 题：题1 Judge ACCEPT → TP；题2 Judge REFUSE → TN；
+     * 题3 Judge 500 → MODEL_ERROR → JUDGE_DEGRADED。此前无混合场景测试，
+     * 单一故障场景（Order 6）与单一成功场景（Order 3）都无法证明
+     * "TP/TN 计数与 evaluatedCount 分母同步收缩"。</p>
+     */
+    @Test
+    @Order(9)
+    void confusionDenominatorInvariantWithMixedJudgeOutcomes() {
+        String json = """
+                [
+                  {"question":"支付回调确认超时是多少？","referenceAnswer":"5 秒",
+                   "answerable":true,"category":"DIRECT","evidenceMode":"SINGLE_CHUNK",
+                   "evidence":[{"docName":"%s","titlePath":"%s"}]},
+                  {"question":"知识库里完全没有的话题问题？","answerable":false,"category":"OUT_OF_KB","failureMode":"OUT_OF_KB","evidence":[]},
+                  {"question":"签名算法是什么？","referenceAnswer":"HMAC-SHA256",
+                   "answerable":true,"category":"TERM_VARIATION",
+                   "evidence":[{"docName":"%s","titlePath":"支付接口文档 > 签名算法"}]}
+                ]
+                """.formatted(DOC_NAME, DOC_TITLE_PATH, DOC_NAME);
+        EvalService.EvalDatasetView ds = evalService.importDataset(
+                multipartFile(json, "分母不变式集.json"), "eval-it-分母不变式", DatasetType.TUNING);
+
+        // Judge 决策按请求次序：seq1 ACCEPT → TP；seq2 REFUSE → TN；
+        // seq3 注入 500 → MODEL_ERROR → degraded（failOpen 放行，但已不计入矩阵）
+        fakeModel.resetNonStreamCounters();
+        fakeModel.setNonStreamFailure(false);
+        fakeModel.setNonStreamAnswer(null); // 恢复默认（= chatAnswer）
+        fakeModel.setNonStreamAnswers(List.of(
+                "{\"answerable\": true, \"confidence\": 0.9, \"reason\": \"证据明确 5 秒\"}",
+                "{\"answerable\": false, \"confidence\": 0.9, \"reason\": \"证据无该话题\"}"));
+        fakeModel.setNonStreamFailureAfter(2); // 第 3 次非流式请求起 500
+        fakeModel.setChatAnswer("依据文档，支付回调确认超时为 5 秒。");
+
+        try {
+            EvalRunEntity run = evalService.createRun(UUID.fromString(ds.id()),
+                    UUID.fromString(ds.latestVersion().versionId()),
+                    UUID.fromString(kbId), null, null);
+            evalService.runSync(UUID.fromString(run.getId()));
+            EvalRunEntity finished = evalService.getRun(UUID.fromString(run.getId()));
+            assertThat(finished.getStatus()).isEqualTo(EvalRunStatus.COMPLETED);
+
+            Map<String, Object> metrics = finished.getMetrics();
+            // 分母链：attempted ≥ executed ≥ evaluated
+            assertThat(metrics.get("attemptedCount")).isEqualTo(3);
+            assertThat(metrics.get("executedCount")).isEqualTo(3);
+            assertThat(metrics.get("evaluatedCount")).isEqualTo(2);
+
+            // 核心不变式：evaluatedCount == TP+FP+FN+TN
+            @SuppressWarnings("unchecked")
+            Map<String, Object> confusion = (Map<String, Object>) metrics.get("answerabilityConfusion");
+            int tp = ((Number) confusion.get("tp")).intValue();
+            int fp = ((Number) confusion.get("fp")).intValue();
+            int fn = ((Number) confusion.get("fn")).intValue();
+            int tn = ((Number) confusion.get("tn")).intValue();
+            assertThat(tp).isEqualTo(1);  // seq1 应答且答
+            assertThat(fp).isZero();
+            assertThat(fn).isZero();
+            assertThat(tn).isEqualTo(1);  // seq2 不应答且拒
+            assertThat(((Number) confusion.get("evaluatedCount")).intValue())
+                    .as("evaluatedCount 必须等于 TP+FP+FN+TN（degraded 不进四格）")
+                    .isEqualTo(tp + fp + fn + tn);
+
+            // degraded 只体现在明细与成本口径，不污染质量指标
+            @SuppressWarnings("unchecked")
+            Map<String, Object> degraded = (Map<String, Object>) confusion.get("degraded");
+            assertThat(degraded).containsEntry("MODEL_ERROR", 1);
+            assertThat(((Number) confusion.get("judgeDegradedRate")).doubleValue()).isGreaterThan(0.0);
+            assertThat(((Number) confusion.get("judgeInvocationRate")).doubleValue()).isEqualTo(1.0);
+
+            // 逐题决策落库可复盘：seq3 = JUDGE_DEGRADED
+            EvalRunViewService.ItemPage items = runViewService.listItems(finished, 1, 10);
+            assertThat(items.items()).anySatisfy(i -> {
+                assertThat(i.get("answerabilityDecisionType")).isEqualTo("JUDGE_DEGRADED");
+                assertThat(i.get("seq")).isEqualTo(3);
+            });
+        } finally {
+            fakeModel.setNonStreamFailureAfter(0);
+            fakeModel.setNonStreamAnswers(null);
+        }
+    }
+
     private static MockMultipartFile multipartFile(String content, String fileName) {
         return new MockMultipartFile("file", fileName, "application/json",
                 content.getBytes(StandardCharsets.UTF_8));

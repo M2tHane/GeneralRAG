@@ -336,6 +336,47 @@ class AnswerabilityFlowIT {
         assertThat(collector.generatedText).contains("5 秒");
     }
 
+    /**
+     * R6-B.1 fail-open 定向回归：Judge 失败（MODEL_ERROR）→ failOpen（fail-closed=false
+     * 默认）→ 降级放行进生成。此时生成系统指令不得携带"证据是否充分已由前置判定确认"
+     * 之类的错误前提（Judge 并没有成功判定），生成 prompt 必须仍是自洽规则
+     * （自带 evidence-composition 与充分性自检语义）。
+     *
+     * <p>断言的是真实发送给生成模型的 system prompt（FakeOpenAiServer 记录全部
+     * messages content）；不要求生成模型返回特定文案。</p>
+     */
+    @Test
+    @Order(9)
+    void failOpenGenerationPromptStaysSelfSufficient() {
+        fakeModel.resetNonStreamCounters();
+        // Judge 非 JSON 响应 → INVALID_RESPONSE → failOpen 降级放行
+        fakeModel.setNonStreamAnswer("这不是一个 JSON 对象。");
+        fakeModel.setChatAnswer("降级放行后的正常回答。");
+
+        SseCollector collector = stream(HIGH_SCORE_QUESTION);
+        assertThat(collector.awaitTerminal(20)).isTrue();
+        assertThat(collector.errorEvents).isEmpty();
+
+        // failOpen 语义保持：降级放行 → 生成照常进行、citations 非空
+        assertThat(collector.stageDetails).anyMatch(e ->
+                "ANSWERABILITY_CHECKED".equals(e.getKey()) && e.getValue().contains("Judge 降级放行"));
+        assertThat(collector.generatedText).isEqualTo("降级放行后的正常回答。");
+        assertThat(collector.citationsPayload).isNotEmpty();
+
+        // 生成请求确实发出（stream=false 计数 1 次 Judge + 生成走流式）：
+        // 从捕获的 prompts 里取最后一次流式生成的 system message，锁两个关键语义：
+        // 1) 不得包含"前置判定已确认充分"错误前提（fail-open 时该前提不成立）
+        // 2) 仍保留自洽的证据充分性自检（关键事实缺失可拒答）
+        String generationSystem = fakeModel.lastChatPrompts().stream()
+                .filter(c -> c.contains("企业知识库问答助手"))
+                .reduce((first, second) -> second) // 最后一次生成请求的 system
+                .orElse("");
+        assertThat(generationSystem).as("应捕获到生成 system prompt").isNotEmpty();
+        assertThat(generationSystem).doesNotContain("已由前置判定确认");
+        assertThat(generationSystem).contains("如果回答所需的关键事实确实缺失，则明确说明当前证据不足");
+        assertThat(generationSystem).contains("组合这些明确陈述的事实回答");
+    }
+
     // ------------------------------------------------------------------
     // HTTP/SSE 基础设施（与 QaStreamIT 相同模式）
     // ------------------------------------------------------------------
