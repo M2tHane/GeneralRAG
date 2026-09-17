@@ -126,6 +126,10 @@ class IngestionPipelineIT {
         List<EsHit> hits = esChunkIndex.knnSearch(kbId, fakeVector("渠道路由"), 5, 50);
         assertThat(hits).isNotEmpty();
         assertThat(hits).allSatisfy(h -> assertThat(h.chunkId()).startsWith(docId));
+
+        // R6-D.1 §23：非 PDF 文档（MD）不写 parse_metadata，恒 null——
+        // 防止 metadata 写入误扩散到所有文件类型
+        assertThat(documentRepository.findById(docId).orElseThrow().getParseMetadata()).isNull();
     }
 
     @Test

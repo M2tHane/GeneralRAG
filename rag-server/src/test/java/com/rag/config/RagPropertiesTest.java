@@ -108,6 +108,83 @@ class RagPropertiesTest {
         });
     }
 
+    // ---- R6-D.1：PDF AUTO ratio 配置必须限定 [0,1]（@DecimalMin/@DecimalMax）----
+
+    @Test
+    void maxEmptyPageRatioOutsideUnitIntervalFailsStartup() {
+        runner.withPropertyValues(CHAT_BASE_URL, EMBEDDING_BASE_URL,
+                "rag.ingestion.pdf-auto.max-empty-page-ratio=-0.1"
+        ).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(failureMessages(context)).contains("max-empty-page-ratio");
+        });
+        runner.withPropertyValues(CHAT_BASE_URL, EMBEDDING_BASE_URL,
+                "rag.ingestion.pdf-auto.max-empty-page-ratio=1.5"
+        ).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(failureMessages(context)).contains("max-empty-page-ratio");
+        });
+    }
+
+    @Test
+    void minPrintableRatioOutsideUnitIntervalFailsStartup() {
+        runner.withPropertyValues(CHAT_BASE_URL, EMBEDDING_BASE_URL,
+                "rag.ingestion.pdf-auto.min-printable-ratio=-0.1"
+        ).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(failureMessages(context)).contains("min-printable-ratio");
+        });
+        runner.withPropertyValues(CHAT_BASE_URL, EMBEDDING_BASE_URL,
+                "rag.ingestion.pdf-auto.min-printable-ratio=1.5"
+        ).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(failureMessages(context)).contains("min-printable-ratio");
+        });
+    }
+
+    @Test
+    void maxReplacementCharRatioOutsideUnitIntervalFailsStartup() {
+        runner.withPropertyValues(CHAT_BASE_URL, EMBEDDING_BASE_URL,
+                "rag.ingestion.pdf-auto.max-replacement-char-ratio=-0.1"
+        ).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(failureMessages(context)).contains("max-replacement-char-ratio");
+        });
+        runner.withPropertyValues(CHAT_BASE_URL, EMBEDDING_BASE_URL,
+                "rag.ingestion.pdf-auto.max-replacement-char-ratio=1.5"
+        ).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(failureMessages(context)).contains("max-replacement-char-ratio");
+        });
+    }
+
+    /** 0 与 1 边界合法（inclusive）。 */
+    @Test
+    void unitIntervalBoundariesAreLegal() {
+        runner.withPropertyValues(CHAT_BASE_URL, EMBEDDING_BASE_URL,
+                "rag.ingestion.pdf-auto.max-empty-page-ratio=0",
+                "rag.ingestion.pdf-auto.min-printable-ratio=0",
+                "rag.ingestion.pdf-auto.max-replacement-char-ratio=1"
+        ).run(context -> {
+            assertThat(context).hasNotFailed();
+            RagProperties props = context.getBean(RagProperties.class);
+            assertThat(props.getIngestion().getPdfAuto().getMaxEmptyPageRatio()).isZero();
+            assertThat(props.getIngestion().getPdfAuto().getMinPrintableRatio()).isZero();
+            assertThat(props.getIngestion().getPdfAuto().getMaxReplacementCharRatio()).isEqualTo(1.0);
+        });
+        runner.withPropertyValues(CHAT_BASE_URL, EMBEDDING_BASE_URL,
+                "rag.ingestion.pdf-auto.max-empty-page-ratio=1",
+                "rag.ingestion.pdf-auto.min-printable-ratio=1",
+                "rag.ingestion.pdf-auto.max-replacement-char-ratio=0"
+        ).run(context -> {
+            assertThat(context).hasNotFailed();
+            RagProperties props = context.getBean(RagProperties.class);
+            assertThat(props.getIngestion().getPdfAuto().getMaxEmptyPageRatio()).isEqualTo(1.0);
+            assertThat(props.getIngestion().getPdfAuto().getMinPrintableRatio()).isEqualTo(1.0);
+            assertThat(props.getIngestion().getPdfAuto().getMaxReplacementCharRatio()).isZero();
+        });
+    }
+
     /** 失败原因链拼接：Boot 将属性校验失败包在 BeanCreationException 里，需逐层下钻。 */
     private static String failureMessages(
             org.springframework.boot.test.context.assertj.AssertableApplicationContext context) {

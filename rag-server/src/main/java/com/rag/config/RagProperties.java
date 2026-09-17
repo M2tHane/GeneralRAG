@@ -690,18 +690,23 @@ public class RagProperties {
             @Min(value = 0, message = "rag.ingestion.pdf-auto.min-chars-per-page 必须 ≥ 0")
             private int minCharsPerPage = 30;
 
-            /** 空文本页占比上限（有效字符 < empty-page-char-threshold 的页 / 总页数），超过 → mineru。 */
-            @Min(value = 0, message = "rag.ingestion.pdf-auto.max-empty-page-ratio 必须 ≥ 0")
+            /** 空文本页占比上限（有效字符 < empty-page-char-threshold 的页 / 总页数），超过 → mineru。取值 [0,1]。 */
+            @DecimalMin(value = "0.0", inclusive = true, message = "rag.ingestion.pdf-auto.max-empty-page-ratio 必须在 [0,1] 内")
+            @DecimalMax(value = "1.0", inclusive = true, message = "rag.ingestion.pdf-auto.max-empty-page-ratio 必须在 [0,1] 内")
             private double maxEmptyPageRatio = 0.8;
 
             /** 判定空文本页的单页有效字符阈值。 */
             @Min(value = 0, message = "rag.ingestion.pdf-auto.empty-page-char-threshold 必须 ≥ 0")
             private int emptyPageCharThreshold = 20;
 
-            /** 可打印字符占比下限（按 Unicode 类别，中文/英文/数字/常见标点均算可打印），低于 → LOW_TEXT_QUALITY → mineru。 */
+            /** 可打印字符占比下限（按 Unicode 类别，中文/英文/数字/常见标点均算可打印），低于 → LOW_TEXT_QUALITY → mineru。取值 [0,1]。 */
+            @DecimalMin(value = "0.0", inclusive = true, message = "rag.ingestion.pdf-auto.min-printable-ratio 必须在 [0,1] 内")
+            @DecimalMax(value = "1.0", inclusive = true, message = "rag.ingestion.pdf-auto.min-printable-ratio 必须在 [0,1] 内")
             private double minPrintableRatio = 0.90;
 
-            /** U+FFFD replacement 字符占比上限（按非空白字符），超过 → GARBLED_TEXT → mineru。 */
+            /** U+FFFD replacement 字符占比上限（按非空白字符），超过 → GARBLED_TEXT → mineru。取值 [0,1]。 */
+            @DecimalMin(value = "0.0", inclusive = true, message = "rag.ingestion.pdf-auto.max-replacement-char-ratio 必须在 [0,1] 内")
+            @DecimalMax(value = "1.0", inclusive = true, message = "rag.ingestion.pdf-auto.max-replacement-char-ratio 必须在 [0,1] 内")
             private double maxReplacementCharRatio = 0.05;
 
             public int getMinChars() {

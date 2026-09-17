@@ -155,6 +155,9 @@ class PdfManualParserIT {
         assertThat(taskRepository.findByDocumentId(docId).orElseThrow().getStatus())
                 .isEqualTo(TaskStatus.COMPLETED);
         DocumentEntity doc = documentRepository.findById(docId).orElseThrow();
+        // R6-D.1：手动 PDFBOX 也写 identity metadata（requested=selected=PDFBOX），
+        // 不是 null——记录"文档实际由哪个 parser 解析"
+        assertThat(doc.getParseMetadata()).isNotNull();
         Map<String, Object> parser = parserMetadata(doc);
         assertThat(parser.get("requested")).isEqualTo("PDFBOX");
         assertThat(parser.get("selected")).isEqualTo("PDFBOX");

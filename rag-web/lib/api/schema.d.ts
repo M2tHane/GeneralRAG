@@ -72,7 +72,9 @@ export interface paths {
          *     R6-D 增加 auto：上传后 PDFBox 质量探针 + 确定性规则路由（探针失败/低文本密度/
          *     空文本页过多/低质量文本/乱码 → mineru，其余 → pdfbox）。AUTO 一旦选定 parser，
          *     该 parser 正式解析失败即任务失败，禁止换 parser 静默回退；路由决策与探针指标
-         *     记录在 document 详情的 parseMetadata.parser（selected/routingReason/probe）。
+         *     记录在 document 详情的 parseMetadata.parser（selected/routingReason/probe），
+         *     正式解析失败时同样持久化（AUTO 决策已产生即为事实，供失败复盘）。
+         *     手动 pdfbox/mineru 模式写入 identity metadata（requested=selected，无路由）。
          *     多版本语义（R3-P3）：KB 内同名同类型且内容不同 → 作为该文档组的新版本并自动激活
          *     （激活切换在上传受理时发生，入库期间旧版本仍可检索）；同内容 → 409（不论版本组）。
          *     删除激活版本时组内自动回落激活最新的 COMPLETED 旧版。
@@ -570,13 +572,17 @@ export interface components {
             chunkConfig: components["schemas"]["ChunkingConfig"];
             contentSha256: string;
             /**
-             * @description PDF AUTO 路由元数据（R6-D，仅 pdf-parser=auto 且解析成功后非空）：
+             * @description PDF 文档解析路由元数据（R6-D/R6-D.1）。非 PDF 文档恒为 null。
+             *     AUTO（rag.ingestion.pdf-parser=auto）：
              *     {parser: {requested: "AUTO", selected: "PDFBOX|MINERU",
              *               routingReason: "TEXT_PDF|LOW_TEXT_DENSITY|TOO_MANY_EMPTY_TEXT_PAGES|
              *                              LOW_TEXT_QUALITY|GARBLED_TEXT|PROBE_FAILED",
              *               probe: {pageCount, charCount, charsPerPage, emptyPageRatio,
              *                       printableRatio, replacementCharRatio, probeLatencyMs}}}。
-             *     手动 pdfbox/mineru 模式恒为 null。
+             *     只要 AUTO routing decision 已产生即持久化——正式解析失败（任务 FAILED）
+             *     时同样写入，供失败复盘。
+             *     手动（pdfbox/mineru）：requested=selected=<模式>，routingReason=null，
+             *     不含 probe 键。
              */
             parseMetadata?: Record<string, never> | null;
             failureStage?: components["schemas"]["PipelineStage"];

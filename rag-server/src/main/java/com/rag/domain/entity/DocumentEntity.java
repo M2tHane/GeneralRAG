@@ -98,9 +98,11 @@ public class DocumentEntity {
     private String parsedObjectKey;
 
     /**
-     * 解析路由元数据（R6-D，JSON 列）：仅 PDF AUTO 模式填充——
-     * {parser:{requested,selected,routingReason,probe:{...}}}；手动模式恒 null
-     * （requestedParser 由全局配置承载，无需冗余落库）。
+     * 解析路由元数据（R6-D/R6-D.1，JSON 列）：仅 PDF 文档写入，非 PDF 恒 null。
+     * AUTO 模式——{parser:{requested:"AUTO",selected,routingReason,probe:{...}}}，
+     * 正式解析成功或失败（routing decision 已产生）都持久化；
+     * 手动模式——requested=selected=<模式>，routingReason=null，无 probe
+     * （记录文档实际由哪个 parser 解析）。
      */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "parse_metadata", columnDefinition = "json")
