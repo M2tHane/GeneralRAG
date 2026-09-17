@@ -13,60 +13,85 @@
 - 第五轮（检索质量/Excel 分块）：`docs/round5/01-Round5实施记录.md`
 - 项目范围冻结：`docs/FEATURE-FREEZE.md`（Current Scope / Completed / Known Limitations / Future Work）
 
-## 环境要求
+## Quick Start
+
+前置条件（版本来自 `pom.xml` / `package.json` 与实际运行验证）：
 
 - JDK 17+、Maven 3.9+
-- Docker（docker compose 提供全部中间件）
-- Node 20+ / pnpm（前端）
-- 模型服务：OpenAI 兼容端点的 Chat 与 Embedding 服务（本地 vLLM/Ollama 或远端 API 均可，密钥走环境变量，不入仓库）
-- 重排服务（可选）：DashScope 原生重排端点。**注意它不是 OpenAI 兼容路径**（`/compatible-mode/v1/rerank` 返回 404），因此单独配置
-
-## 1. 启动中间件
+- Docker + Docker Compose（全部中间件由 compose 提供）
+- Node 20+ 与 pnpm（前端 Next.js 14）
+- 模型服务：OpenAI 兼容端点的 Chat 与 Embedding 服务（本地 vLLM/Ollama 或远端 API 均可，密钥走环境变量不入仓库；默认 `startup-check=true` 时 Embedding 必须在启动时可达）
+- 重排服务（**可选**）：DashScope 原生重排端点，**不是 OpenAI 兼容路径**（`/compatible-mode/v1/rerank` 返回 404）；不配置时重排自动降级为融合顺序，问答仍可用
 
 ```bash
+# 1. Clone
+git clone https://github.com/M2tHane/GeneralRAG && cd GeneralRAG
+
+# 2. 配置环境变量（主路径：根目录 .env；应用不会自动读取 .env，需在启动后端时 source）
+cp .env.example .env
+# 编辑 .env，必填：CHAT_MODEL_BASE_URL/NAME、EMBEDDING_BASE_URL/NAME、
+#                  CHAT_MODEL_API_KEY/EMBEDDING_API_KEY（本地推理服务可留空）、
+#                  MYSQL_PASSWORD（与 docker-compose.yml 一致：rag-pass）
+# 可选：RERANK_MODEL_*（不填则重排降级）、RAG_* 行为开关
+
+# 3. 启动中间件（MySQL 3306 / ES 9200 / MinIO 9000+9001 控制台）
 docker compose up -d
-# rag-mysql  3306（root-pass / rag / rag-pass，库 rag）
-# rag-es     9200（首启自动安装 analysis-ik 插件，约 1-2 分钟；日志见 "try load config ... IKAnalyzer"）
-# rag-minio  9000 API / 9001 控制台（minioadmin/minioadmin，本地开发默认，生产必须替换）
+# rag-es 首次启动自动安装 analysis-ik 插件，约 1-2 分钟
+
+# 4. 启动后端（http://localhost:8080）
+cd rag-server
+set -a && source ../.env && set +a
+mvn spring-boot:run
+
+# 5. 启动前端（http://localhost:3000；/api 由 next.config.mjs rewrites 代理到 8080）
+cd ../rag-web
+pnpm install
+pnpm dev          # 生产模式可改用 pnpm build && pnpm start
+
+# 6. 验证
+curl http://localhost:8080/actuator/health   # {"status":"UP"}，含 db / elasticsearch 分项
+# 浏览器打开 http://localhost:3000 → 自动跳转 /kb 知识库页
 ```
 
-## 2. 启动后端（rag-server）
+### 7. 上传第一个文档
+
+前端「知识库」页创建知识库 → 进入详情上传 `md / txt / pdf / docx / xlsx / csv` → 文档列表轮询任务状态至 `COMPLETED`。命令行等价：
 
 ```bash
-cd rag-server
-export MYSQL_PWD=rag-pass
-export SPRING_DATASOURCE_USERNAME=rag
-export SPRING_DATASOURCE_PASSWORD=rag-pass
-
-# 模型服务（必填；startup-check 会真实调用 embedding 校验连通性与维度）
-export CHAT_MODEL_BASE_URL=http://your-llm-endpoint/v1     # OpenAI 兼容
-export CHAT_MODEL_API_KEY=...                              # 本地推理服务可留空
-export CHAT_MODEL_NAME=your-chat-model
-export EMBEDDING_BASE_URL=http://your-embed-endpoint/v1
-export EMBEDDING_API_KEY=...
-export EMBEDDING_MODEL_NAME=your-embedding-model
-# 维度：application.yaml 的 rag.models.embedding.dimensions 固定为 1024，
-# embedding 模型实际输出必须一致，否则启动探活失败（如需改维度直接改该配置项）
-
-# 重排服务（可选；不配置则重排相关能力自动降级为融合顺序，问答仍可用）
-export RERANK_MODEL_BASE_URL=https://dashscope.aliyuncs.com  # 原生端点，非 OpenAI 兼容路径
-export RERANK_MODEL_API_KEY=...
-export RERANK_MODEL_NAME=qwen3.7-text-rerank
-
-# 检索模式与拒答阈值（可选覆盖）
-export RAG_RETRIEVAL_MODE=HYBRID_RERANK   # VECTOR | HYBRID | HYBRID_RERANK
-export RAG_REFUSAL_RERANK_THRESHOLD=0.75  # 重排口径阈值（默认 0.75，R4.1 重校准值）；切模式/模型需重校准
-export RAG_REFUSAL_COSINE_THRESHOLD=0.30  # 余弦口径阈值（默认 0.30，重排降级时生效）
-# Answerability 证据充分性判定（默认开启；低分直拒，其余交给 LLM Judge）
-export RAG_ANSWERABILITY_ENABLED=true
-export RAG_ANSWERABILITY_FAIL_CLOSED=false # Judge 失败时 false=退回旧阈值放行 / true=保守拒答
-
-mvn spring-boot:run   # http://localhost:8080
+curl -X POST http://localhost:8080/api/v1/knowledge-bases \
+  -H 'Content-Type: application/json' -d '{"name":"my-kb"}'
+curl -X POST http://localhost:8080/api/v1/knowledge-bases/{kbId}/documents -F file=@./doc.md
+curl http://localhost:8080/api/v1/documents/{docId}/task   # status: QUEUED→RUNNING→COMPLETED
 ```
 
-配置项全览见 `rag-server/src/main/resources/application-example.yaml`；`rag.retrieval.*`（top-k / min-score / mode / rrf / rerank / refusal）、`rag.ingestion.max-upload-size-mb` 等均可按需覆盖。
+### 8. 问第一个问题
 
-### 检索模式与阈值口径（重要）
+前端会话页选择知识库提问；命令行等价（SSE 流）：
+
+```bash
+curl -N -X POST http://localhost:8080/api/v1/qa/stream -H 'Content-Type: application/json' \
+  -d '{"kbId":"...","sessionId":"...","question":"..."}'
+```
+
+`stage` 事件透出 RETRIEVAL → ANSWERABILITY → GENERATION 真实阶段；回答仅依据检索证据并带 citations 来源引用，证据不足时拒答且 citations 为空数组。
+
+## Optional Services（与最小启动解耦）
+
+| 服务 | 什么时候需要 | 如何启用 |
+| --- | --- | --- |
+| 重排服务 | 默认 `HYBRID_RERANK` 模式想要重排精度 | `.env` 填 `RERANK_MODEL_BASE_URL`（裸域名）/`RERANK_MODEL_API_KEY`/`RERANK_MODEL_NAME`；不可达时自动降级为融合顺序并在调试/评测中标注 |
+| MinerU（OCR） | 扫描件/复杂版面 PDF | 部署 mineru-api 后在 `.env` 填 `MINERU_BASE_URL`，并设 `RAG_INGESTION_PDF_PARSER=mineru`（强制远端解析）或 `auto`（R6-D 质量探针路由） |
+
+默认 `pdf-parser=pdfbox`，**最小启动不需要 MinerU**，普通文本 PDF 直接入库。
+
+## Troubleshooting（本轮实际启动验证遇到的问题）
+
+- **后端启动失败 `Access denied for user 'rag' ... (using password: NO)`**：`MYSQL_PASSWORD` 未生效——application.yaml 默认密码为空。确认根目录已 `cp .env.example .env`，并按上方 `set -a && source ../.env && set +a` 方式加载（compose 内 MySQL 密码固定 `rag-pass`）。
+- **后端启动失败「embedding 启动探活失败 / 维度不一致」**：`EMBEDDING_BASE_URL/API_KEY/MODEL_NAME` 指向的端点不可达，或模型输出维度 ≠ `rag.models.embedding.dimensions`（固定 1024；改维度直接改该配置项，且需清空 ES 分块重新入库）。模型服务晚于应用启动的本地场景可临时 `RAG_MODELS_STARTUP_CHECK=false`。
+- **前端页面请求 500**：`/api/*` 代理到 8080，后端未启动即 500——先确认后端 health。
+- **rag-es 启动慢**：首启安装 analysis-ik 插件约 1-2 分钟（装进镜像层后重启不重复下载）。
+
+## 检索模式与阈值口径（重要）
 
 三种模式的 `score` 语义不同，**不可直接互相比较，切换模式后需重新校准 minScore 与拒答阈值**：
 
@@ -76,7 +101,7 @@ mvn spring-boot:run   # http://localhost:8080
 | `HYBRID` | 余弦相似度（排序由 RRF 融合决定） | 融合分只用于排序；阈值判断用绝对余弦分 |
 | `HYBRID_RERANK` | 重排相关度（请求内相对值） | 实测区分度最好 |
 
-拒答阈值分两套口径：重排生效时用 `rerank-threshold`（默认 0.65，实测可分：可答题 ≥0.79、资料外 ≤0.63）；降级/未启用重排时用 `cosine-threshold`（默认 0.30，**区分度弱**，实测资料外题余弦分与可答题区间重叠，无法可靠识别资料外问题）。
+拒答阈值分两套口径：重排生效时用 `rerank-threshold`（默认 0.75，R4.1 重校准值，**模型绑定**，更换 rerank 模型或语料分布后必须重新校准）；降级/未启用重排时用 `cosine-threshold`（默认 0.30，**区分度弱**，实测资料外题余弦分与可答题区间重叠，无法可靠识别资料外问题）。
 
 ### 证据充分性判定（Answerability，R4）
 
@@ -109,15 +134,9 @@ Judge 超时/不可用/解析失败                      → JUDGE_DEGRADED（�
 
 `RAG_MODELS_STARTUP_CHECK=false` 可启动用于界面/管理链路验证；此时上传会在 EMBEDDING 阶段失败（原因可读、可重试），问答/调试返回 `RETRIEVAL_FAILED`——这是设计内的降级行为，不是缺陷。重排服务不可达时不会导致问答失败，而是显式降级为融合顺序并在调试页/评测运行中标注「已降级、未重排」。
 
-## 3. 启动前端（rag-web）
+配置项全览见 `rag-server/src/main/resources/application-example.yaml`（Advanced Configuration Reference；Quick Start 只需要 `.env`，两者不要同时作为主配置入口使用）；`rag.retrieval.*`（top-k / min-score / mode / rrf / rerank / refusal）、`rag.ingestion.max-upload-size-mb` 等均可按需覆盖。
 
-```bash
-cd rag-web
-pnpm install
-pnpm build && pnpm start   # http://localhost:3000（/api 由 Next.js rewrites 代理到 8080）
-```
-
-## 4. 评测
+## 评测（4）
 
 1. 建知识库并上传 `docs/eval-corpus/` 下的语料（来源与说明见 `docs/eval/README.md`）；
 2. 导入数据集：`POST /api/v1/eval/datasets`（multipart：file / name / datasetType）——
@@ -131,7 +150,7 @@ pnpm build && pnpm start   # http://localhost:3000（/api 由 Next.js rewrites �
 4. 查看结果：`GET /api/v1/eval/runs/{runId}`（Hit@1/3/5、Recall@5、MRR、拒答正确率、**Answerability 混淆矩阵（TP/FP/FN/TN、False Answer Rate、False Refusal Rate、Judge 调用率/降级率/耗时）、耗时拆分与 p50/p95/max、逐题回答与来源与判定记录**），`PATCH .../items/{itemId}` 人工标注；
 5. 前端「效果评测」页可浏览运行列表、查看单次运行、**勾选两次运行做对比**（可比性守卫 + 指标变化 + 逐题计数 + 逐题下钻到分阶段位次）。
 
-## 5. 测试
+## 测试（5）
 
 ```bash
 cd rag-server && mvn test        # 43 个测试类（含集成测试，直连开发 Docker 的 MySQL/ES/MinIO）
