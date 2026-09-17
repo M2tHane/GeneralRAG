@@ -314,9 +314,36 @@ class EvidenceSufficiencyJudgeTest {
             assertThat(prompt).contains("同一产品的不同参数");
             assertThat(prompt).contains("同一技术的不同功能");
             assertThat(prompt).contains("证据之外的知识");
-            assertThat(prompt).contains("完整、明确地回答");
+            // R6-B：核心定义由"完整、明确地回答"升级为"完整、可靠、不过度推断"
+            assertThat(prompt).contains("完整、可靠、不过度推断");
             // R4.1：历史非证据声明钉进系统提示词
             assertThat(prompt).contains("仅用于理解问题中的指代");
+        }).doesNotThrowAnyException();
+    }
+
+    /**
+     * R6-B：判定核心定义收紧——"相关 ≠ 充分"、充分性三补充规则（A 派生推理
+     * 禁止 / B yes-no 反驳即充分 / C 组合≠推断）必须钉进系统提示词（防漂移）。
+     */
+    @Test
+    void systemPromptContainsR6BSufficiencySemantics() {
+        assertThatCode(() -> {
+            java.lang.reflect.Field f = EvidenceSufficiencyJudge.class.getDeclaredField("SYSTEM_INSTRUCTION");
+            f.setAccessible(true);
+            String prompt = (String) f.get(null);
+            // 核心定义：RELEVANT ≠ SUFFICIENT
+            assertThat(prompt).contains("相关不等于充分");
+            assertThat(prompt).contains("完整、可靠、不过度推断");
+            // A. 派生推理禁止（算术/聚合/占比/补全/外部常识/因果）
+            assertThat(prompt).contains("禁止派生推理");
+            assertThat(prompt).contains("算术运算").contains("聚合").contains("占比")
+                    .contains("补全").contains("常识");
+            // B. yes/no 修正型：证据明确反驳命题即足以回答"不是"
+            assertThat(prompt).contains("是/否型问题的反驳即充分");
+            assertThat(prompt).contains("相反的事实");
+            // C. 多块组合允许，组合外的未陈述新结论禁止
+            assertThat(prompt).contains("证据组合与推断的边界");
+            assertThat(prompt).contains("多个证据分块可以组合使用");
         }).doesNotThrowAnyException();
     }
 }

@@ -38,6 +38,21 @@ class PromptAssemblerTest {
         assertThat(system).contains("不构成回答依据"); // QA-3：历史非证据
     }
 
+    /**
+     * R6-B：Judge ACCEPT 后生成不得自行软拒答——"证据充分已由前置判定确认，
+     * 有直接依据就必须作答"的一致性约束必须钉进系统提示词（防漂移）。
+     */
+    @Test
+    void systemInstructionContainsR6BSufficiencyConsistencyRule() {
+        List<ChatMessage> messages = assembler.build(
+                "磁盘告警怎么处理？", List.of(), new Context("【文档 1】指南\n磁盘处理", 20, List.of("d-c0001"), false));
+
+        String system = ((SystemMessage) messages.get(0)).text();
+        assertThat(system).contains("已由前置判定确认");
+        assertThat(system).contains("必须依据证据作答");
+        assertThat(system).contains("不要因为证据显得简短或零散而拒绝回答");
+    }
+
     @Test
     void historyZoneAndEvidenceZoneAreStrictlySeparated() {
         List<PromptAssembler.HistoryTurn> history = List.of(

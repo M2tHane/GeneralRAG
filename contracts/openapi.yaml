@@ -1261,7 +1261,11 @@ components:
         回答/拒答的<b>原因</b>，供调试与评测归因：
         LOW_SCORE_REFUSAL=低于低分阈值直接拒答（未调 Judge）；NO_HITS=零命中直接拒答；
         JUDGE_ACCEPT/JUDGE_REFUSE=灰区与高分由 Evidence Sufficiency Judge 判定
-        （R4 Baseline 证明高分不可答与可答分数完全重叠，不存在安全的"高分直答"阈值）；
+        （R4 Baseline 证明高分不可答与可答分数完全重叠，不存在安全的"高分直答"阈值；
+        R6-B 起 Judge 判定语义收紧为「仅依赖给定证据是否足以完整、可靠、不过度推断地
+        回答」：相关≠充分，需额外算术/聚合/占比等派生推理的新事实判 insufficient，
+        yes/no 型问题证据明确反驳命题即 sufficient，多块证据各自支撑所需事实的组合判
+        sufficient）；
         JUDGE_DEGRADED=Judge 失败按降级策略处理（二级结构化原因见
         AnswerabilityFailureType；decision reason 保留人类可读前缀）；ANSWERABILITY_DISABLED=
         判定关闭（仅对照，行为同旧 RefusalPolicy）。

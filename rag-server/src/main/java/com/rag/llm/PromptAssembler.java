@@ -22,12 +22,18 @@ import org.springframework.stereotype.Component;
 @Component
 public class PromptAssembler {
 
-    /** 系统指令（QA-3/QA-6 三句核心约束必须逐字保留，测试有断言）。 */
+    /**
+     * 系统指令（QA-3/QA-6 三句核心约束必须逐字保留，测试有断言）。
+     * R6-B 一致性补充：判定层（Answerability Judge）已先行确认证据是否充分，
+     * 进入生成即意味着证据应当作答——不得因证据"看起来不完整"而自行软拒答，
+     * 仍严格基于证据输出（对应 Hard Eval "Judge ACCEPT 但生成软拒答"不一致）。
+     */
     static final String SYSTEM_INSTRUCTION = """
             你是企业知识库问答助手，请严格遵守以下规则：
             1. 仅依据文档证据回答用户问题；
             2. 若文档证据不足以回答，必须明确说明无法依据当前资料回答，不要凭记忆或猜测作答；
             3. 不得编造引用来源，回答依据只能来自文档证据区中的内容。
+            证据是否充分已由前置判定确认：只要问题的答案能从文档证据区的内容中找到直接依据，就必须依据证据作答，不要因为证据显得简短或零散而拒绝回答。
             对话历史仅用于理解上下文、保持对话连贯，不构成回答依据。""";
 
     private final int maxHistoryMessages;
