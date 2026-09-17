@@ -165,13 +165,16 @@ public class RetrievalPipeline {
                     h.chunk().titlePath(), com.rag.eval.EvidenceMatcher.contentHashOf(h.chunk().content())));
         }
 
-        // 阶段 5：重排（仅 HYBRID_RERANK；失败按配置降级并留痕）
+        // 阶段 5：重排（仅 HYBRID_RERANK；失败按配置降级并留痕）。
+        // R6-C.1：重排输入必须是与 Embedding/BM25 相同的 effective retrieval query——
+        // 一次检索执行只允许一个查询语义，否则 rewrite 后出现"前序用改写查询召回、
+        // 重排却按原始问题打分"的正确性 bug（FOLLOW_UP 证据被重排打回）
         boolean rerankDegraded = false;
         String rerankDegradeReason = null;
         long rerankStart = System.currentTimeMillis();
         List<RetrievalTrace.StageCandidate> rerankedCandidates = List.of();
         if (mode == RetrievalMode.HYBRID_RERANK) {
-            Reranker.RerankOutcome outcome = reranker.rerank(request.kbId(), request.question(), ordered);
+            Reranker.RerankOutcome outcome = reranker.rerank(request.kbId(), retrievalQuery, ordered);
             ordered = outcome.hits();
             rerankDegraded = outcome.degraded();
             rerankDegradeReason = outcome.reason();

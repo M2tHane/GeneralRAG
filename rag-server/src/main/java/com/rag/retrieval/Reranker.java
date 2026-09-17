@@ -17,7 +17,9 @@ public interface Reranker {
 
     /**
      * @param kbId     检索范围（供重排器做库级隔离/缓存分片）
-     * @param question 用户问题
+     * @param question 本次检索使用的有效 query（R6-C.1：与 Embedding/BM25 同源——
+     *                 history-aware rewrite 生效时为改写后查询，否则为原始问题；
+     *                 不必然等于用户原始问题）
      * @param hits     候选命中（按融合/原分数序）
      * @return 重排结果（含是否降级；降级时顺序为传入顺序）
      */
