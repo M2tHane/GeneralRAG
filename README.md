@@ -158,6 +158,9 @@ Judge 超时/不可用/解析失败                      → JUDGE_DEGRADED（�
 4. 查看结果：`GET /api/v1/eval/runs/{runId}`（Hit@1/3/5、Recall@5、MRR、拒答正确率、**Answerability 混淆矩阵（TP/FP/FN/TN、False Answer Rate、False Refusal Rate、Judge 调用率/降级率/耗时）、耗时拆分与 p50/p95/max、逐题回答与来源与判定记录**），`PATCH .../items/{itemId}` 人工标注；
 5. 前端「效果评测」页可浏览运行列表、查看单次运行、**勾选两次运行做对比**（可比性守卫 + 指标变化 + 逐题计数 + 逐题下钻到分阶段位次）。
 
+**Final RC baseline**：Feature Freeze 后的 canonical Hard Eval 基线（runId、指标与 BadCase 归因）冻结在
+`docs/eval/FINAL-BASELINE.md`。
+
 ## 测试（5）
 
 ```bash
