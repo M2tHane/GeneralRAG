@@ -27,12 +27,15 @@ import org.springframework.stereotype.Component;
  * 三者仍互斥，重复注册启动即失败——原有防护不变）。</p>
  *
  * <p><b>路由元数据</b>：决策（selected/reason/metrics/latency）写入
- * {@link ParseReport}，由流水线经 {@code ctx.parseReport} 持久化到
- * document.parse_metadata（探针指标只存数据库不上抛用户——路由可复盘即可）。</p>
+ * {@link ParseReport}——成功路径随 {@link ParsedDocument} 上浮、失败路径经
+ * {@link PdfAutoParseException} 上浮——由流水线持久化到 document.parse_metadata
+ * （探针指标只存数据库不上抛用户——路由可复盘即可）。</p>
  *
  * <p>失败语义（R6-D §21）：错误文案明确区分三个层次——探针/路由/正式解析。
  * 探针失败不构成错误（路由到 MinerU 是合法决策）；正式解析失败时错误信息
- * 前缀 {@code AUTO selected X because REASON}，绝不伪装成普通 PDF 解析错误。</p>
+ * 前缀 {@code AUTO selected X because REASON}，绝不伪装成普通 PDF 解析错误。
+ * 失败以 {@link PdfAutoParseException} 结构化抛出（携带 ParseReport，
+ * 错误码保留 delegate 原值，cause 保留原异常）。</p>
  */
 @Component
 @Conditional(AutoPdfParserEnabled.class)
@@ -76,8 +79,7 @@ public class AutoPdfParser implements DocumentParser {
                 decision.metrics().emptyPageRatio(), decision.metrics().printableRatio(),
                 decision.metrics().replacementCharRatio(), decision.metrics().probeLatencyMs());
 
-        ParseReport report = new ParseReport(decision.selectedParser().name(),
-                decision.reason().name(), decision.probeFailed(), decision.metrics());
+        ParseReport report = ParseReport.auto(decision);
         ParsedDocument parsed;
         try {
             parsed = switch (decision.selectedParser()) {
@@ -86,10 +88,14 @@ public class AutoPdfParser implements DocumentParser {
             };
         } catch (RuntimeException e) {
             // 所选 parser 的正式解析失败 = 明确的入库失败。不换 parser（AUTO ≠ fallback）。
-            // 探针失败与正式解析失败在文案上区分（AUTO_PROBE vs PDF_PARSE）。
-            throw new DomainException(e instanceof DomainException de ? de.getCode() : ErrorCode.INTERNAL_ERROR,
+            // R6-D.1：抛结构化异常携带已产生的 routing report，失败路径同样持久化
+            // parse_metadata（成功路径 report 随 ParsedDocument 上浮，两条路径同源）。
+            // 错误码保留 delegate 原值；cause 保留原异常堆栈。
+            throw new PdfAutoParseException(
+                    e instanceof DomainException de ? de.getCode() : ErrorCode.INTERNAL_ERROR,
                     "AUTO selected " + decision.selectedParser() + " because " + decision.reason()
-                            + "；正式解析失败：" + e.getMessage());
+                            + "；正式解析失败：" + e.getMessage(),
+                    report, e);
         }
         return parsed.withParseReport(report);
     }

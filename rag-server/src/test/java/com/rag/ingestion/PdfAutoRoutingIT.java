@@ -227,7 +227,8 @@ class PdfAutoRoutingIT {
         assertThat(parsed).contains("MinerU OCR");
     }
 
-    /** R6-D §31 最重要的 correctness test：AUTO→MINERU→500 = FAILED，绝不切 PDFBox。 */
+    /** R6-D §31 最重要的 correctness test：AUTO→MINERU→500 = FAILED，绝不切 PDFBox。
+     *  R6-D.1：失败路径同样持久化 parse_metadata（routing decision 已产生即为事实）。 */
     @Test
     void mineruFailureAfterAutoDecisionFailsWithoutPdfBoxFallback() {
         String kbId = newKb();
@@ -247,6 +248,16 @@ class PdfAutoRoutingIT {
         // 其"首页无文本层 → SCANNED_PDF_NOT_SUPPORTED"会让失败原因不同）
         assertThat(mineruRequestsDelta()).isEqualTo(1);
         assertThat(task.getFailureReason()).doesNotContain("SCANNED_PDF_NOT_SUPPORTED");
+
+        // R6-D.1 核心集成断言：任务 FAILED 后重新加载 document，routing metadata 仍存在
+        DocumentEntity doc = documentRepository.findById(docId).orElseThrow();
+        Map<String, Object> parser = parserMetadata(doc);
+        assertThat(parser.get("requested")).isEqualTo("AUTO");
+        assertThat(parser.get("selected")).isEqualTo("MINERU");
+        assertThat(parser.get("routingReason")).isEqualTo("LOW_TEXT_DENSITY");
+        Map<String, Object> probe = (Map<String, Object>) parser.get("probe");
+        assertThat(((Number) probe.get("charCount")).longValue()).isZero();
+        assertThat(((Number) probe.get("probeLatencyMs")).longValue()).isGreaterThanOrEqualTo(0);
     }
 
     /** R6-D §32 对照面：AUTO→PDFBOX→正式解析失败 = FAILED，绝不切 MinerU。 */

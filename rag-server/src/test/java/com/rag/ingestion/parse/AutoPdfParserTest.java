@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
@@ -76,31 +77,74 @@ class AutoPdfParserTest {
         verify(pdfBoxParser, never()).parse(any(InputStream.class), any(FileType.class));
     }
 
-    /** R6-D §31 核心语义：AUTO→PDFBOX→解析失败 = 失败，绝不切 MinerU。 */
+    /** R6-D §31 核心语义：AUTO→PDFBOX→解析失败 = 失败，绝不切 MinerU。
+     *  R6-D.1：失败以结构化 PdfAutoParseException 抛出，携带已产生的 ParseReport
+     *  （selected/routingReason 可复盘），错误码保留 delegate 原值。 */
     @Test
     void pdfBoxFailureAfterPdfBoxDecisionNeverFallsBackToMinerU() {
         when(router.route(any(InputStream.class))).thenReturn(decision(PdfParserChoice.PDFBOX, PdfRoutingReason.TEXT_PDF));
         when(pdfBoxParser.parse(any(InputStream.class), any(FileType.class)))
                 .thenThrow(new DomainException(com.rag.domain.exception.ErrorCode.SCANNED_PDF_NOT_SUPPORTED));
 
-        assertThatThrownBy(() -> parser.parse(new ByteArrayInputStream(PDF_BYTES), FileType.PDF))
+        org.assertj.core.api.ThrowableAssert.ThrowingCallable call =
+                () -> parser.parse(new ByteArrayInputStream(PDF_BYTES), FileType.PDF);
+        assertThatThrownBy(call)
                 .isInstanceOf(DomainException.class)
                 .hasMessageContaining("AUTO selected PDFBOX because TEXT_PDF");
         verify(mineruParser, never()).parse(any(InputStream.class), any(FileType.class));
+
+        // 结构化上下文：report 来自异常对象而非异常字符串反推
+        PdfAutoParseException structured = catchThrowableOfType(call, PdfAutoParseException.class);
+        assertThat(structured.parseReport().selectedParser()).isEqualTo("PDFBOX");
+        assertThat(structured.parseReport().routingReason()).isEqualTo("TEXT_PDF");
+        assertThat(structured.parseReport().probeFailed()).isFalse();
+        assertThat(structured.getCode()).isEqualTo(com.rag.domain.exception.ErrorCode.SCANNED_PDF_NOT_SUPPORTED);
+        assertThat(structured.getCause()).isInstanceOf(DomainException.class);
     }
 
-    /** R6-D §14 核心语义：AUTO→MINERU→失败 = 失败，绝不切 PDFBox。 */
+    /** R6-D §14 核心语义：AUTO→MINERU→失败 = 失败，绝不切 PDFBox。
+     *  R6-D.1：结构化 report 记录 selected=MINERU + routingReason。 */
     @Test
     void mineruFailureAfterMineruDecisionNeverFallsBackToPdfBox() {
-        when(router.route(any(InputStream.class))).thenReturn(decision(PdfParserChoice.MINERU, PdfRoutingReason.PROBE_FAILED));
+        when(router.route(any(InputStream.class))).thenReturn(decision(PdfParserChoice.MINERU, PdfRoutingReason.LOW_TEXT_DENSITY));
         when(mineruParser.parse(any(InputStream.class), any(FileType.class)))
                 .thenThrow(new DomainException(com.rag.domain.exception.ErrorCode.PARSER_UNAVAILABLE, "MinerU 服务不可达"));
 
-        assertThatThrownBy(() -> parser.parse(new ByteArrayInputStream(PDF_BYTES), FileType.PDF))
+        org.assertj.core.api.ThrowableAssert.ThrowingCallable call =
+                () -> parser.parse(new ByteArrayInputStream(PDF_BYTES), FileType.PDF);
+        assertThatThrownBy(call)
                 .isInstanceOf(DomainException.class)
-                .hasMessageContaining("AUTO selected MINERU because PROBE_FAILED")
+                .hasMessageContaining("AUTO selected MINERU because LOW_TEXT_DENSITY")
                 .hasMessageContaining("MinerU 服务不可达");
         verify(pdfBoxParser, never()).parse(any(InputStream.class), any(FileType.class));
+
+        PdfAutoParseException structured = catchThrowableOfType(call, PdfAutoParseException.class);
+        assertThat(structured.parseReport().selectedParser()).isEqualTo("MINERU");
+        assertThat(structured.parseReport().routingReason()).isEqualTo("LOW_TEXT_DENSITY");
+        assertThat(structured.getCode()).isEqualTo(com.rag.domain.exception.ErrorCode.PARSER_UNAVAILABLE);
+    }
+
+    /** R6-D.1：探针失败（PROBE_FAILED→MINERU）后 MinerU 也失败——routing 事实
+     *  （probeFailed=true + 占位 metrics）仍随结构化异常保留。 */
+    @Test
+    void mineruFailureAfterProbeFailedDecisionKeepsProbeFailedReport() {
+        when(router.route(any(InputStream.class)))
+                .thenReturn(PdfRoutingDecision.probeFailed(PdfQualityMetrics.failed(3)));
+        when(mineruParser.parse(any(InputStream.class), any(FileType.class)))
+                .thenThrow(new DomainException(com.rag.domain.exception.ErrorCode.PARSER_UNAVAILABLE, "MinerU 500"));
+
+        org.assertj.core.api.ThrowableAssert.ThrowingCallable call =
+                () -> parser.parse(new ByteArrayInputStream(PDF_BYTES), FileType.PDF);
+        assertThatThrownBy(call)
+                .isInstanceOf(DomainException.class)
+                .hasMessageContaining("AUTO selected MINERU because PROBE_FAILED");
+        verify(pdfBoxParser, never()).parse(any(InputStream.class), any(FileType.class));
+
+        PdfAutoParseException structured = catchThrowableOfType(call, PdfAutoParseException.class);
+        assertThat(structured.parseReport().selectedParser()).isEqualTo("MINERU");
+        assertThat(structured.parseReport().routingReason()).isEqualTo("PROBE_FAILED");
+        assertThat(structured.parseReport().probeFailed()).isTrue();
+        assertThat(structured.parseReport().probe().pageCount()).isZero();
     }
 
     /** 探针失败是合法路由决策（→ MINERU），不是异常。 */

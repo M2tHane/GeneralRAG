@@ -1,8 +1,10 @@
 package com.rag.ingestion.parse;
 
 /**
- * 解析路由报告（R6-D）：AUTO 模式的决策与探针指标，随 ParsedDocument 上浮，
- * 由流水线持久化到 document.parse_metadata。
+ * 解析路由报告（R6-D）：AUTO 模式的决策与探针指标。成功路径随
+ * {@link ParsedDocument} 上浮、失败路径经 {@link PdfAutoParseException} 上浮
+ * （R6-D.1），由流水线持久化到 document.parse_metadata——同一个对象两条路径复用，
+ * 不从异常字符串反推。
  *
  * <p>手动模式（pdfbox/mineru）无报告——requestedParser=selectedParser，
  * 无路由发生（R6-D §16：routingReason=null 而非造 MANUAL_SELECTION 值，保持简单）。</p>

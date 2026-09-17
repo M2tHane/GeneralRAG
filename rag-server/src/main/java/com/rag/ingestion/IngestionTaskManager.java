@@ -261,15 +261,24 @@ public class IngestionTaskManager {
         DocumentParser parser = parserRouter.route(doc.getFileType());
         try (InputStream in = objectStore.getSource(doc.getKbId(), doc.getId(),
                 sourceExtensions.get(doc.getFileType()))) {
-            ParsedDocument parsed = parser.parse(in, doc.getFileType());
+            ParsedDocument parsed;
+            try {
+                parsed = parser.parse(in, doc.getFileType());
+            } catch (com.rag.ingestion.parse.PdfAutoParseException e) {
+                // R6-D.1：AUTO 路由决策已产生（selected/reason/probe 是确定事实），
+                // 所选 parser 正式解析失败时 routing metadata 同样持久化——
+                // 不依赖解析成功，也不从异常字符串反推（report 由结构化异常携带）。
+                // 持久化后再 rethrow（fail() 落任务失败态）。
+                persistPdfParseMetadata(doc, e.parseReport());
+                throw e;
+            }
             // R6-D：解析路由元数据持久化到 document.parse_metadata，保证
             // "这个 PDF 为什么被送到 MinerU / 实际谁解析的"可复盘。
             // AUTO：report 携带 selected/routingReason/probe；手动：requested=selected，
             // routingReason=null（§16 语义）。定向 UPDATE（理由同 updateStatusFields）；
             // 非 PDF 文件类型每种格式只有一个 parser，无路由信息可记，不写。
             if (doc.getFileType() == FileType.PDF) {
-                documentRepository.updateParseMetadata(doc.getId(),
-                        parseMetadataOf(doc, parsed.parseReport()));
+                persistPdfParseMetadata(doc, parsed.parseReport());
             }
             ctx.parsed = parsed.withDocumentName(doc.getName());
         } catch (java.io.IOException e) {
@@ -277,7 +286,27 @@ public class IngestionTaskManager {
         }
     }
 
-    /** R6-D：ParseReport → document.parse_metadata JSON 结构（结构示例见 V8 迁移注释）。 */
+    /**
+     * R6-D.1：ParseReport → document.parse_metadata 统一持久化（成功/失败两条路径
+     * 同源同一 serializer，禁止复制两份 Map 拼装逻辑）。
+     *
+     * <p>定向下 UPDATE 写库（理由同 updateStatusFields：避免全字段 merge 把 worker
+     * 快照里的旧 active 位写回撞唯一键），并同步内存快照 doc.parseMetadata——
+     * 失败路径后续 fail() 会对 doc 做全字段 save，若不同步，快照里的 null
+     * parseMetadata 会把刚写入的 metadata 抹掉。</p>
+     *
+     * <p>report=null（手动模式/无路由发生）仍写 identity metadata：
+     * requested=selected=全局配置、routingReason=null（§16 语义），记录
+     * "文档实际由哪个 parser 解析"；仅非 PDF 文件不调用本方法。</p>
+     */
+    private void persistPdfParseMetadata(DocumentEntity doc, com.rag.ingestion.parse.ParseReport report) {
+        Map<String, Object> metadata = parseMetadataOf(doc, report);
+        documentRepository.updateParseMetadata(doc.getId(), metadata);
+        doc.setParseMetadata(metadata);
+    }
+
+    /** R6-D：ParseReport → document.parse_metadata JSON 结构（结构示例见 V8 迁移注释）。
+     *  成功/失败两条路径共用本 serializer；失败时 report 来自 PdfAutoParseException。 */
     private Map<String, Object> parseMetadataOf(DocumentEntity doc, com.rag.ingestion.parse.ParseReport report) {
         String requested = ragProperties.getIngestion().getPdfParser().toUpperCase(java.util.Locale.ROOT);
         Map<String, Object> parser = new LinkedHashMap<>();
