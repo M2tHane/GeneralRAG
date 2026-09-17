@@ -1478,7 +1478,9 @@ components:
           additionalProperties: true
           description: |
             R6-A 正例按 evidenceMode 分组：每类 {count, hitAt1/3/5, mrr,
-            evidenceCoverageAvg, fullEvidenceCoverageRate, refused, frr}。
+            evidenceCoverageAvg（macro：逐题 coverage 后平均，与全局口径一致）,
+            fullEvidenceCoverageRate, evidenceRecall（micro：covered chunks / required chunks 总数）,
+            refused, frr}。R6-A.1 起 evidenceCoverageAvg 与 evidenceRecall 两个口径明确区分。
         refusalAccuracy:
           type: number
           nullable: true

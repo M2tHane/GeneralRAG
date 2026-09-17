@@ -228,6 +228,12 @@ class EvalFlowIT {
         assertThat(singleRow).isNotNull();
         assertThat(((Number) singleRow.get("count")).intValue()).isEqualTo(1);
         assertThat(((Number) singleRow.get("hitAt1")).doubleValue()).isEqualTo(1.0);
+        // R6-A.1 §11/§12：组内 macro coverage 与 micro recall 双口径输出且此处等值
+        //（单题 1/1：macro = micro = 1.0，键存在即口径已接线；多题差异由 Hard 集验证）
+        assertThat(singleRow).containsKeys("evidenceCoverageAvg", "evidenceRecall",
+                "fullEvidenceCoverageRate");
+        assertThat(((Number) singleRow.get("evidenceCoverageAvg")).doubleValue()).isEqualTo(1.0);
+        assertThat(((Number) singleRow.get("evidenceRecall")).doubleValue()).isEqualTo(1.0);
 
         // 明细：可回答题 hit=true + retrieved 快照 + 回答与引用；OUT_OF_KB 题 hit=null
         EvalRunViewService.ItemPage items = runViewService.listItems(finished, 1, 20);

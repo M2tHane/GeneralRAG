@@ -217,8 +217,10 @@ public class EvalRunExecutor {
         // R6-A：failureMode 分组（负例诊断）——[样本数, 被系统回答(FP), 正确拒答(TN)]
         Map<String, int[]> failureModeStats = new java.util.LinkedHashMap<>();
         // R6-A：evidenceMode 分组（正例分形态诊断）
-        // [count, hit@1, hit@3, hit@5, mrrSum, coveredEvidence, totalEvidence, fullCovItems,
-        //  fn(应答被拒), fp(不应答被答), refusedCount]
+        // [count, hit@1, hit@3, hit@5, mrrSum, itemCoverageSum, itemCoverageCount, fullCovItems,
+        //  coveredEvidence, totalEvidence, fn(应答被拒), refusedCount]
+        // R6-A.1 §11：evidenceCoverageAvg 统一为 macro average（逐题 coverage 再平均），
+        // 与全局口径一致；micro 口径（covered chunks / total chunks）改由 evidenceRecall 输出
         Map<String, double[]> evidenceModeStats = new java.util.LinkedHashMap<>();
         List<Integer> latencies = new java.util.ArrayList<>();
 
@@ -318,10 +320,13 @@ public class EvalRunExecutor {
                         fullCoverageCount++;
                     }
                 }
-                // R6-A：evidenceMode 分组累计（命中/位次口径与上完全同源）
+                // R6-A/R6-A.1：evidenceMode 分组累计（命中/位次口径与上完全同源）
+                // 数组布局（12 槽）：[0]=count [1..3]=hit@1/3/5 [4]=mrrSum
+                // [5]=itemCoverageSum(macro) [6]=itemCoverageCount [7]=fullCovItems
+                // [8]=coveredEvidence(micro) [9]=totalEvidence(micro) [10]=fn [11]=refused
                 if (item.getEvidenceMode() != null) {
                     double[] s = evidenceModeStats.computeIfAbsent(
-                            item.getEvidenceMode().name(), k -> new double[11]);
+                            item.getEvidenceMode().name(), k -> new double[12]);
                     s[0]++; // count
                     for (int k = 0; k < HIT_KS.length; k++) {
                         if (firstEvidenceRank <= Math.min(HIT_KS[k], topK)) {
@@ -331,10 +336,14 @@ public class EvalRunExecutor {
                     if (hit) {
                         s[4] += 1.0 / firstEvidenceRank; // mrrSum
                     }
-                    s[5] += coveredForItem; // coveredEvidence
-                    s[6] += evidence.size(); // totalEvidence
-                    if (!evidence.isEmpty() && coveredForItem == evidence.size()) {
-                        s[7]++; // fullCovItems
+                    if (!evidence.isEmpty()) {
+                        s[5] += (double) coveredForItem / evidence.size(); // macro 逐题 coverage
+                        s[6]++; // coverage 计数分母
+                        s[8] += coveredForItem; // micro 分子
+                        s[9] += evidence.size(); // micro 分母
+                        if (coveredForItem == evidence.size()) {
+                            s[7]++; // fullCovItems
+                        }
                     }
                 }
             }
@@ -360,7 +369,7 @@ public class EvalRunExecutor {
                             fnCount++;
                             // R6-A：evidenceMode 的 FRR 分子（应答被拒）
                             if (item.getEvidenceMode() != null) {
-                                evidenceModeStats.get(item.getEvidenceMode().name())[8]++;
+                                evidenceModeStats.get(item.getEvidenceMode().name())[10]++;
                             }
                         } else {
                             tnCount++;
@@ -375,13 +384,10 @@ public class EvalRunExecutor {
                         failureModeStats.computeIfAbsent(failureModeKey(item), k -> new int[3])[0]++;
                         failureModeStats.get(failureModeKey(item))[1]++;
                     }
-                    // R6-A：evidenceMode 的 refused 计数（组内 FRR/FAR 分母侧）
+                    // R6-A：evidenceMode 的 refused 计数（组内 FRR 分母侧）
                     if (item.getEvidenceMode() != null) {
                         double[] s = evidenceModeStats.get(item.getEvidenceMode().name());
-                        s[10] += refused ? 1 : 0;
-                        if (!refused) {
-                            s[9]++; // 不应被拒却被答 → 无 FN，FRR 分母
-                        }
+                        s[11] += refused ? 1 : 0;
                     }
                     // R4：类别拆分统计（expectedAnswerable / refused / misjudged）
                     String catKey = item.getCategory() == null ? "UNKNOWN" : item.getCategory().name();
@@ -639,12 +645,16 @@ public class EvalRunExecutor {
     }
 
     /**
-     * R6-A evidenceMode 分组指标（§10）。
+     * R6-A evidenceMode 分组指标（§10）；R6-A.1 §11/§12 口径修正。
      *
-     * <p>每类输出（正例）：count、hitAt1/3/5、mrr、evidenceCoverageAvg
-     * （组内证据 chunk 级覆盖率）、fullEvidenceCoverageRate、refused（FRR 分子）、
+     * <p>每类输出（正例）：count、hitAt1/3/5、mrr、
+     * evidenceCoverageAvg（<b>macro</b>：逐题 coverage=covered/required 后组内平均，
+     * 与全局 evidenceCoverageAvg 口径一致）、fullEvidenceCoverageRate、
+     * evidenceRecall（<b>micro</b>：组内 covered chunks / required chunks 总数，
+     * 与全局 recallAt5 同族口径，两者并存且明确区分）、refused（FRR 分子）、
      * frr = refused/count。数组布局：[0]=count [1..3]=hit@1/3/5 [4]=mrrSum
-     * [5]=covered [6]=total [7]=fullCov [8]=fn [9]=notRefused [10]=refused。</p>
+     * [5]=itemCoverageSum [6]=itemCoverageCount [7]=fullCov [8]=coveredChunks
+     * [9]=totalChunks [10]=fn [11]=refused。</p>
      */
     private static Map<String, Object> evidenceModeBreakdown(Map<String, double[]> stats, int topK) {
         Map<String, Object> breakdown = new LinkedHashMap<>();
@@ -661,8 +671,9 @@ public class EvalRunExecutor {
             row.put("evidenceCoverageAvg", s[6] == 0 ? null : round4(s[5] / s[6]));
             row.put("fullEvidenceCoverageRate", count == 0 ? null
                     : round4(s[7] / count));
-            row.put("refused", (int) s[10]);
-            row.put("frr", count == 0 ? null : round4(s[10] / count));
+            row.put("evidenceRecall", s[9] == 0 ? null : round4(s[8] / s[9]));
+            row.put("refused", (int) s[11]);
+            row.put("frr", count == 0 ? null : round4(s[11] / count));
             row.put("hitAtK", (int) Math.min(topK, 5));
             breakdown.put(e.getKey(), row);
         }
